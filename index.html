@@ -225,6 +225,12 @@ table.grid input[type=checkbox]{width:auto}
     </div>
   </div></section>
 
+  <section class="panel"><h2>보조 원장 (매출장 등 — 계정별 모집단 원천)</h2><div class="body">
+    <p class="hint" style="margin-top:0">총계정원장 전표가 월별 집계라 샘플링이 안 되는 계정(매출·매입 등)은 매출장·매입장 같은 세부 원장을 올려 모집단으로 씁니다. 여러 개를 올릴 수 있고(원장마다 패널이 생김), 카드의 「모집단 원천」에서 고릅니다. 행마다 「구분값」(상품매출·제품매출…)을 정하고, 카드에서 원천을 이 원장으로 바꾼 뒤 구분값을 고르면 같은 조서가 나옵니다.</p>
+    <div id="dropS" class="drop">보조 원장 엑셀을 끌어놓거나 <button class="ghost mini" id="pickS">파일 선택</button><input type="file" id="fileS" accept=".xlsx,.xls,.csv" hidden></div>
+    <div id="subList"></div>
+  </div></section>
+
   <section class="panel"><h2>공통 파라미터</h2><div class="body">
     <p class="hint" style="margin-top:0">새 계정 카드의 초기값입니다. 카드에서 계정별로 바꿀 수 있습니다.</p>
     <div class="row2">
@@ -314,6 +320,7 @@ document.addEventListener('input',e=>{const el=e.target;if(!(el instanceof HTMLI
 const S={
   stmts:[{title:'(1) 제조원가명세서',rows:[]},{title:'(2) 손익계산서',rows:[]}],
   ledger:{wb:null,raw:[],hdr:[],map:{},rows:[],codes:[]},
+  subs:[],
   accts:[],            // 계정 카드
   stmtWb:null
 };
@@ -496,6 +503,7 @@ $('lSheet').onchange=loadLedgerSheet;$('lHdr').onchange=()=>{buildLMap();parseLe
 function loadLedgerSheet(){
   const ws=S.ledger.wb.Sheets[$('lSheet').value];
   S.ledger.raw=sheetRows(ws);
+  if(S.ledger.raw.length>50000){S.ledger.wb=null;$('lSheet').disabled=true;$('lSheet').title='대용량 파일은 메모리 절약을 위해 다른 시트 전환 시 재업로드가 필요합니다'}
   let g=1;for(let i=0;i<Math.min(30,S.ledger.raw.length);i++){const st=(S.ledger.raw[i]||[]).filter(v=>typeof v==='string'&&v.trim()).length;if(st>=4){g=i+1;break}}
   $('lHdr').value=g;buildLMap();parseLedger();
 }
@@ -560,7 +568,7 @@ function newAcct(name,fsAmt,fromScope){
   return Object.assign({id:Math.random().toString(36).slice(2),name:name.trim(),fromScope:!!fromScope,fsAmt:fsAmt??0,codes:S.ledger.codes.length?suggestCodes(name):[],
     side:type.includes('매출')?'cr':'dr',acctType:type.includes('매출')?'AR':'LE',evType:type,evid:'',keyPct:null,
     recon:'gross',carryKw:'전기이월,기초이월',closeKw:'결산분개,손익대체,결산대체,마감분개',offsetKw:'',
-    adj:[],ex:[],seed:null,wp:'',open:false},d);
+    adj:[],ex:[],seed:null,wp:'',open:false,src:'gl',cats:[]},d);
 }
 function syncAcctsFromScope(){
   const fins=[];S.stmts.forEach(st=>st.rows.forEach(r=>{if(r.fin)fins.push(r)}));
@@ -574,23 +582,130 @@ function syncAcctsFromScope(){
 $('addAcct').onclick=()=>{const n=$('addName').value.replace(/[\s\u3000]+/g,'');if(!n)return;const a=newAcct(n,0,false);S.accts.push(a);syncAcctsFromScope();$('addName').value='';renderAccts()};
 $('applyDefaults').onclick=()=>{const d=defaults();S.accts.forEach(a=>{Object.assign(a,d);a._autoWp=true;a.seed=null});syncAcctsFromScope();renderAccts()};
 
+/* ---------- 보조 원장 (매출장 등) ---------- */
+const SUBFIELDS=[['key','식별/전표',['전표번호','전표','식별','slip','key']],['vendor','거래처명',['거래처명','거래처','cust_nm','고객']],['vcode','거래처코드',['거래처코드','cst_code','cust_code','고객코드']],
+  ['date','날짜',['전표일자','일자','날짜','date','jnp_date']],['amt','금액',['공급가액','금액','매출액','amt','jnp_amt','합계']],['item','품목코드',['품목코드','제품코드','상품코드','item_cd','jpm_cd1','cd1']],
+  ['itemName','품목명',['품목명','제품명','상품명','item_nm','jpm_name','name']],['desc','적요/비고',['적요','비고','remark','메모']],['biz','사업자번호',['사업자','nabno']]];
+const SUBKEYS=['idx','key','date','desc','vcode','vendor','biz','amt0','item','itemName'];
+const subOf=id=>S.subs.find(x=>x.id===id);
+$('pickS').onclick=()=>$('fileS').click();
+$('fileS').onchange=e=>{const f=e.target.files[0];if(f)subLoadFile(f);e.target.value=''};
+const dzS=$('dropS');['dragenter','dragover'].forEach(t=>dzS.addEventListener(t,e=>{e.preventDefault();dzS.classList.add('on')}));['dragleave','drop'].forEach(t=>dzS.addEventListener(t,e=>{e.preventDefault();dzS.classList.remove('on')}));
+dzS.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)subLoadFile(f)});
+function subLoadFile(f){setStatus('보조 원장 읽는 중…');readWb(f,wb=>{
+  const sub={id:'s'+Math.random().toString(36).slice(2,8),name:f.name.replace(/\.[^.]+$/,''),wb,sheet:wb.SheetNames[0],hdrRow:1,hdr:[],raw:[],rows:[],map:{},keyCols:[],catCol:-1,mapText:'',mapTable:{},pivotCols:[-1,-1],cats:[],unmapped:[],stat:null,ext:null};
+  S.subs.push(sub);subLoadSheet(sub);})}
+function subLoadSheet(sub){
+  const ws=sub.wb.Sheets[sub.sheet];sub.raw=sheetRows(ws);
+  if(sub.raw.length>50000)sub.wb=null;
+  let g=1;for(let i=0;i<Math.min(30,sub.raw.length);i++){const st=(sub.raw[i]||[]).filter(v=>typeof v==='string'&&v.trim()).length;if(st>=4){g=i+1;break}}
+  sub.hdrRow=g;subSetHdr(sub);subAutoMap(sub);subParse(sub);
+}
+function subSetHdr(sub){const h=sub.hdrRow-1;sub.hdr=(sub.raw[h]||[]).map((v,i)=>({i,label:(v==null?'':String(v)).trim()||('열 '+col(i))}))}
+function subAutoMap(sub){
+  const used=new Set();const find=kws=>{for(const kw of kws){const f=sub.hdr.find(c=>!used.has(c.i)&&norm(c.label).toLowerCase().includes(norm(kw).toLowerCase()));if(f){used.add(f.i);return f.i}}return -1};
+  sub.map={};SUBFIELDS.forEach(([k,,kws])=>sub.map[k]=find(kws));
+  const fh=re=>{const f=sub.hdr.find(c=>re.test(norm(c.label).toLowerCase()));return f?f.i:-1};
+  sub.pivotCols=[fh(/gubun_nm|거래구분|구분명|거래유형/),fh(/dtgbn_nm|할인구분|할인/)];
+  if(sub.catCol<0){sub.catCol=fh(/^매출구분$|^계정구분$|^계정$|^매출계정$/)}
+  if(!sub.keyCols.length&&sub.map.item>=0)sub.keyCols=[sub.map.item];
+}
+function subParse(sub){
+  const h=sub.hdrRow,M=sub.map,g=(r,k)=>M[k]>=0?r[M[k]]:null;const rows=[];let zero=0;
+  for(let i=h;i<sub.raw.length;i++){const r=sub.raw[i]||[];if(r.every(v=>v==null||v===''))continue;
+    const amt=toNum(g(r,'amt'));if(!amt)zero++;
+    let key=g(r,'key');if(key instanceof Date)key=fmtDate(key);key=key==null||key===''?`${sub.name}_${rows.length+1}`:String(key);
+    let date=g(r,'date');if(date instanceof Date)date=fmtDate(date);else if(/^\d{8}$/.test(String(date??'')))date=String(date).replace(/(\d{4})(\d{2})(\d{2})/,'$1/$2/$3');date=date==null?'':String(date);
+    const item=String(g(r,'item')??''),itemName=String(g(r,'itemName')??''),remark=String(g(r,'desc')??'');
+    rows.push({idx:i,pos:rows.length,src:sub.id,key,date,desc:[item&&itemName?item+' / '+itemName:(item||itemName),remark].filter(Boolean).join(' · '),vcode:String(g(r,'vcode')??''),vendor:String(g(r,'vendor')??''),biz:String(g(r,'biz')??''),amt0:amt,item,itemName,bal:0,proj:'',code:'',name:''});
+  }
+  // 식별 열이 고유하지 않으면(예: 일련번호) 자동 식별자로 대체
+  if(M.key>=0){const u=new Set(rows.map(r=>r.key));if(u.size<rows.length*0.9){rows.forEach((r,i)=>r.key=`${sub.name}_${i+1}`);sub.keyAuto=true}else sub.keyAuto=false}
+  sub.rows=rows;sub.stat={read:sub.raw.length-h,rows:rows.length,zero};sub.ext=null;subClassify(sub);
+}
+function subRawVal(sub,r,ci){if(sub.raw.length){const raw=sub.raw[r.idx];return raw?raw[ci]:undefined}if(sub.ext&&sub.ext[ci]){const e=sub.ext[ci];const k=e.idx[r.pos];return k==null||k<0?undefined:e.dict[k]}return undefined}
+function parseMapText(t){const m={};(t||'').split(/\r?\n/).forEach(l=>{l=l.trim();if(!l)return;const parts=l.split(/\t|,/).map(x=>x.trim()).filter(Boolean);let k,c;if(parts.length>=2){k=parts[0];c=parts.slice(1).join(' ')}else{const mm=l.match(/^(\S+)\s+(.+)$/);if(!mm)return;k=mm[1];c=mm[2]}m[norm(k)]=c});return m}
+function subClassify(sub){
+  sub.mapTable=parseMapText(sub.mapText);const hasMap=Object.keys(sub.mapTable).length>0;
+  const cats={},un={};
+  sub.rows.forEach(r=>{let cat='';
+    if(sub.catCol>=0){const v=subRawVal(sub,r,sub.catCol);cat=v==null?'':String(v).trim()}
+    let kv='';if(!cat&&sub.keyCols.length){kv=sub.keyCols.map(ci=>{const v=subRawVal(sub,r,ci);return v==null?'':String(v).trim()}).join('-');if(hasMap)cat=sub.mapTable[norm(kv)]||''}
+    r.keyv=kv;r.code=cat||'(미매핑)';r.name=r.code;
+    const c=cats[r.code]||(cats[r.code]={cat:r.code,n:0,amt:0});c.n++;c.amt+=r.amt0;
+    if(!cat&&kv){const u=un[kv]||(un[kv]={key:kv,name:r.itemName||'',n:0,amt:0});u.n++;u.amt+=r.amt0}
+  });
+  sub.cats=Object.values(cats).sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt));sub.unmapped=Object.values(un).sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt));
+  renderSubs();renderAccts();
+}
+function renderSubs(){
+  const host=$('subList');
+  host.innerHTML=S.subs.map(sub=>{
+    const opts=sel=>['<option value="-1">(없음)</option>'].concat(sub.hdr.map(c=>`<option value="${c.i}" ${sel===c.i?'selected':''}>${col(c.i)} · ${esc(c.label)}</option>`)).join('');
+    const un=sub.unmapped,unAmt=un.reduce((s,u)=>s+u.amt,0);
+    return `<div class="acct" data-open data-sub="${sub.id}" style="margin-top:10px"><h3><span>${esc(sub.name)}</span><span class="chip">${sub.rows.length.toLocaleString()}행</span><span class="res" style="margin-left:auto">${sub.raw.length?'':'(저장 파일에서 복원)'}</span></h3><div class="body">
+      <div class="row3"><label class="f"><span>시트</span><select data-sf="sheet" ${sub.wb?'':'disabled'}>${(sub.wb?sub.wb.SheetNames:[sub.sheet]).map(n=>`<option ${n===sub.sheet?'selected':''}>${esc(n)}</option>`).join('')}</select></label>
+        <label class="f"><span>머리글 행</span><input type="number" data-sf="hdrRow" value="${sub.hdrRow}" min="1" ${sub.wb?'':'disabled'}></label>
+        <label class="f"><span>이름</span><input type="text" data-sf="name" value="${esc(sub.name)}"></label></div>
+      <div style="font-size:12px;color:var(--ink-2);margin:4px 0">열 매핑</div>
+      <div class="row3">${SUBFIELDS.map(([k,l])=>`<div class="map" style="grid-template-columns:80px 1fr"><span>${l}</span><select data-sm="${k}" ${sub.raw.length?'':'disabled'}>${opts(sub.map[k])}</select></div>`).join('')}</div>
+      <div style="font-size:12px;color:var(--ink-2);margin:8px 0 4px"><b>구분값 결정</b> — ① 구분 열이 있으면 그 값을 쓰고, 없으면 ② 키 열 값을 매핑표에서 찾습니다</div>
+      <div class="row3">
+        <label class="f"><span>① 구분 열 (예: 매출구분·계정)</span><select data-sf="catCol">${opts(sub.catCol)}</select></label>
+        <label class="f"><span>② 키 열 1 (예: 품목코드)</span><select data-sf="key0">${opts(sub.keyCols[0]??-1)}</select></label>
+        <label class="f"><span>② 키 열 2 (선택, '-'로 연결)</span><select data-sf="key1">${opts(sub.keyCols[1]??-1)}</select></label>
+      </div>
+      <label class="f"><span>② 매핑표 — 한 줄에 「키 [탭/쉼표/공백] 구분값」 (엑셀 두 열 복사·붙여넣기 가능)</span><textarea data-sf="mapText" rows="4" placeholder="DIQ6505&#9;상품매출&#10;PZD2105&#9;제품매출">${esc(sub.mapText)}</textarea></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="ghost mini" data-sa="mapFile">매핑표 파일에서 불러오기</button><button class="ghost mini" data-sa="unDl" ${un.length?'':'disabled'}>미매핑 키 목록 엑셀</button><button class="ghost mini" data-sa="del">보조 원장 삭제</button></div>
+      <div class="row2" style="margin-top:8px"><label class="f"><span>집계표 행 (예: 거래구분)</span><select data-sf="pv0">${opts(sub.pivotCols[0])}</select></label><label class="f"><span>집계표 열 (예: 할인구분)</span><select data-sf="pv1">${opts(sub.pivotCols[1])}</select></label></div>
+      <div style="font-size:12px;color:var(--ink-2);margin-top:6px">구분값 요약 (전체 ${sub.rows.length.toLocaleString()}행 · 금액 0 행 ${(sub.stat?sub.stat.zero:0).toLocaleString()})</div>
+      <table class="grid"><tr><th>구분값</th><th class="n">건수</th><th class="n">금액 합계</th></tr>${sub.cats.map(c=>`<tr${c.cat==='(미매핑)'?' style="color:var(--red)"':''}><td>${esc(c.cat)}</td><td class="n">${c.n.toLocaleString()}</td><td class="n">${num(c.amt)}</td></tr>`).join('')}</table>
+      ${un.length?`<div class="warn" style="margin:6px 0 4px">미매핑 키 ${un.length.toLocaleString()}개 · ${num(unAmt)} — 상위 20개 (품목명 · 건수 · 금액). 매핑표에 추가하거나 회사에 구분 열을 요청하세요.</div>
+      <div class="codes" style="max-height:120px">${un.slice(0,20).map(u=>`<span class="chip">${esc(u.key)} ${esc(u.name)} · ${u.n} · ${num(u.amt)}</span>`).join('')}</div>`:''}
+    </div></div>`}).join('');
+  host.querySelectorAll('[data-sub]').forEach(box=>{
+    const sub=subOf(box.dataset.sub);
+    box.querySelector('h3').onclick=()=>box.toggleAttribute('data-open');
+    box.querySelectorAll('[data-sf]').forEach(el=>el.onchange=()=>{const f=el.dataset.sf;
+      if(f==='sheet'){sub.sheet=el.value;subLoadSheet(sub);return}
+      if(f==='hdrRow'){sub.hdrRow=Math.max(1,+el.value||1);subSetHdr(sub);subAutoMap(sub);subParse(sub);return}
+      if(f==='name'){sub.name=el.value;renderSubs();renderAccts();return}
+      if(f==='catCol'){sub.catCol=+el.value;subClassify(sub);return}
+      if(f==='key0'||f==='key1'){const k=[+box.querySelector('[data-sf=key0]').value,+box.querySelector('[data-sf=key1]').value].filter(v=>v>=0);sub.keyCols=k;subClassify(sub);return}
+      if(f==='mapText'){sub.mapText=el.value;subClassify(sub);return}
+      if(f==='pv0'||f==='pv1'){sub.pivotCols=[+box.querySelector('[data-sf=pv0]').value,+box.querySelector('[data-sf=pv1]').value];return}
+    });
+    box.querySelectorAll('[data-sm]').forEach(el=>el.onchange=()=>{sub.map[el.dataset.sm]=+el.value;subParse(sub)});
+    box.querySelectorAll('[data-sa]').forEach(b=>b.onclick=async()=>{const act=b.dataset.sa;
+      if(act==='del'){S.subs=S.subs.filter(x=>x!==sub);S.accts.forEach(a=>{if(a.src==='sub:'+sub.id){a.src='gl';a.cats=[]}});renderSubs();renderAccts()}
+      if(act==='mapFile'){const inp=document.createElement('input');inp.type='file';inp.accept='.xlsx,.xls,.csv,.txt';inp.onchange=e=>{const f=e.target.files[0];if(!f)return;readWb(f,wb=>{const ws=wb.Sheets[wb.SheetNames[0]];const rows=sheetRows(ws);const lines=[];rows.forEach(r=>{const v=r.filter(x=>x!=null&&x!=='');if(v.length>=2)lines.push(v[0]+'\t'+v.slice(1).join(' '))});sub.mapText=(sub.mapText?sub.mapText+'\n':'')+lines.join('\n');subClassify(sub);setStatus(`매핑표 ${lines.length}행 추가`)})};inp.click()}
+      if(act==='unDl'){const wb=new ExcelJS.Workbook();const ws=wb.addWorksheet('미매핑 키');['키','품목명','건수','금액','구분값(입력)'].forEach((h,i)=>put(ws,col(i)+'1',h,{hdr:1}));sub.unmapped.forEach((u,i)=>{put(ws,'A'+(i+2),u.key);put(ws,'B'+(i+2),u.name);put(ws,'C'+(i+2),u.n);put(ws,'D'+(i+2),u.amt,{fmt:N});put(ws,'E'+(i+2),'',{fill:C_IN})});widths(ws,{A:16,B:40,C:8,D:18,E:18});download(await wb.xlsx.writeBuffer(),`미매핑키_${sub.name}.xlsx`);setStatus('E열에 구분값을 채워 「매핑표 파일에서 불러오기」로 다시 올리면 됩니다 (A·E열만 읽음)')}
+    });
+  });
+}
+
 function acctRows(a){
+  if(a.src&&a.src.startsWith('sub:')){const sub=subOf(a.src.slice(4));if(!sub)return [];
+    return sub.rows.filter(r=>a.cats.includes(r.code)).map(r=>({...r,dr:a.side==='dr'?r.amt0:0,cr:a.side==='cr'?r.amt0:0,amt:r.amt0,pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}))}
   const sel=S.ledger.rows.filter(r=>a.codes.includes(r.code));
   return sel.map(r=>({...r,amt:a.side==='dr'?r.dr-r.cr:r.cr-r.dr,pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}));
 }
 const EXOPS=[['contains','포함'],['equals','일치'],['starts','시작'],['notContains','불포함'],['empty','비어 있음'],['notEmpty','비어 있지 않음']];
-function exFieldOptions(){   // 매핑 필드 + 원장 원본 열
+function exFieldOptions(a){   // 매핑 필드 + 원천 원본 열
   const o=EXFIELDS.map(([v,l])=>[v,l]);
-  (S.ledger.hdr||[]).forEach(h=>o.push(['col:'+h.i,'원장 열 '+col(h.i)+' · '+h.label]));
+  const sub=a&&a.src&&a.src.startsWith('sub:')?subOf(a.src.slice(4)):null;
+  if(sub){o.push(['item','품목코드'],['itemName','품목명']);sub.hdr.forEach(h=>o.push(['col:'+h.i,sub.name+' 열 '+col(h.i)+' · '+h.label]))}
+  else (S.ledger.hdr||[]).forEach(h=>o.push(['col:'+h.i,'원장 열 '+col(h.i)+' · '+h.label]));
   return o;
 }
-function colAvailable(ci){return S.ledger.raw.length>0||!!(S.ledger.ext&&S.ledger.ext[ci])}
-function exFieldLabel(f){const o=exFieldOptions().find(x=>x[0]===f);return o?o[1]:f}
+function colAvailable(ci,a){const sub=a&&a.src&&a.src.startsWith('sub:')?subOf(a.src.slice(4)):null;if(sub)return sub.raw.length>0||!!(sub.ext&&sub.ext[ci]);return S.ledger.raw.length>0||!!(S.ledger.ext&&S.ledger.ext[ci])}
+function exFieldLabel(f,a){const o=exFieldOptions(a).find(x=>x[0]===f);return o?o[1]:f}
 function exFieldVal(r,field){
   if(!field||field==='pdesc')return String(r.pdesc??'');
   if(field==='any')return [r.pdesc,r.vcode,r.key,r.name,r.date,r.proj,r.biz,r.code].map(v=>String(v??'')).join(' | ');
   if(field.startsWith('col:')){const ci=+field.slice(4);let v;
-    if(S.ledger.raw.length){const raw=S.ledger.raw[r.idx];v=raw?raw[ci]:undefined}
+    if(r.src){const sub=subOf(r.src);v=sub?subRawVal(sub,r,ci):undefined}
+    else if(S.ledger.raw.length){const raw=S.ledger.raw[r.idx];v=raw?raw[ci]:undefined}
     else if(S.ledger.ext&&S.ledger.ext[ci]){const e=S.ledger.ext[ci];const k=e.idx[r.pos];v=k==null||k<0?undefined:e.dict[k]}
     else if(r.ext)v=r.ext[ci];
     return v==null?'':String(v)}
@@ -666,7 +781,7 @@ function ledgerSideOf(codes){   // 매핑 코드의 원장 차·대변 합계로
   if(!dr&&!cr)return null;return {dr,cr,side:cr>dr?'cr':'dr'};
 }
 function autoSide(a){
-  if(a._sideManual||!a.codes.length)return;
+  if(a._sideManual||!a.codes.length||(a.src&&a.src.startsWith('sub:')))return;
   const g=ledgerSideOf(a.codes);if(!g)return;
   if(g.side!==a.side){a.side=g.side;a.acctType=g.side==='cr'?'AR':'LE';if(!a.evid)a.evType=g.side==='cr'?(/해외|수출/.test(norm(a.name))?'해외매출':'국내매출'):(a.evType==='기타'?'매입':a.evType);a.seed=null}
 }
@@ -698,9 +813,13 @@ function renderAccts(){
   if(!S.accts.length){host.innerHTML='<section class="panel"><div class="body hint">①에서 대상 계정이 정해지면 카드가 생깁니다.</div></section>';$('dl2').disabled=true;return}
   const hasL=S.ledger.rows.length>0;
   host.innerHTML=S.accts.map(a=>{
-    const r=hasL&&a.codes.length?calcAcct(a):null;a._r=r;
+    const isSub=!!(a.src&&a.src.startsWith('sub:')),sub=isSub?subOf(a.src.slice(4)):null;
+    if(isSub&&!sub){a.src='gl';a.cats=[]}
+    if(isSub&&sub&&a.codes.length&&!a._fsManual&&hasL){const v=a.codes.reduce((s,c)=>s+codeSideSum(a,c),0);if(v)a.fsAmt=v}
+    const ready=isSub?(sub&&a.cats.length>0):(hasL&&a.codes.length>0);
+    const r=ready?calcAcct(a):null;a._r=r;
     const band=BAND[a.acctType][a.risk][a.rely],kp=keyPctOf(a);
-    const res=r?`${r.keys.length} + ${r.rep} = ${r.total}건${r.resid!==0?' · 차이 미해소':''}`:(hasL?'계정코드 미매핑':'원장 없음');
+    const res=r?`${r.keys.length} + ${r.rep} = ${r.total}건${r.resid!==0?' · 차이 미해소':''}`:(isSub?'구분값 미선택':(hasL?'계정코드 미매핑':'원장 없음'));
     return `<div class="acct" ${a.open?'data-open':''} data-id="${a.id}">
       <h3><span>${esc(a.name)}</span><span class="chip">${esc(a.wp)}</span><span class="chip ${a.fromScope?'y':'o'}">${a.fromScope?'인스코프':'수동'}</span><span class="res ${(!r||r.resid!==0)?'bad':''}">${res}</span></h3>
       <div class="body">
@@ -709,7 +828,9 @@ function renderAccts(){
           <label class="f"><span>양수 방향</span><select data-f="side"><option value="dr" ${a.side==='dr'?'selected':''}>차변(비용·매입)</option><option value="cr" ${a.side==='cr'?'selected':''}>대변(매출·수익)</option></select></label>
           <label class="f"><span>재무제표(시산) 금액</span><input type="text" class="money" data-f="fsAmt" value="${fmtMoney(a.fsAmt)}" inputmode="numeric"></label>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:12px;color:var(--ink-2)">원장 계정코드 매핑</span>
+        ${S.subs.length?`<label class="f"><span>모집단 원천</span><select data-f="src"><option value="gl" ${!isSub?'selected':''}>총계정원장 (계정코드)</option>${S.subs.map(x=>`<option value="sub:${x.id}" ${a.src==='sub:'+x.id?'selected':''}>보조 원장 · ${esc(x.name)}</option>`).join('')}</select></label>`:''}
+        ${isSub&&sub?`<div style="font-size:12px;color:var(--ink-2)">구분값 선택 — 이 계정에 속하는 행</div><div class="codes" style="max-height:110px">${sub.cats.map(c=>`<label><input type="checkbox" data-cat="${esc(c.cat)}" ${a.cats.includes(c.cat)?'checked':''}>${esc(c.cat)} <span class="hint" style="margin:0">${c.n.toLocaleString()}건 · ${num(c.amt)}</span></label>`).join('')}</div>`:''}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:12px;color:var(--ink-2)">${isSub?'재무제표 금액 연결 — 총계정원장 계정코드 (당기 발생액을 재무제표 금액으로 자동 반영)':'원장 계정코드 매핑'}</span>
           <input type="text" data-codesearch value="${esc(a._q||'')}" placeholder="코드 앞자리 또는 계정명 검색" style="width:220px;padding:3px 6px;font-size:12px">
           <span class="hint" style="margin:0">선택 ${a.codes.length}개: ${a.codes.map(c=>`<span class="chip y">${esc(c)}</span>`).join('')||'없음'}</span></div>
         <div class="codes" data-codelist>${codeListHtml(a)}</div>
@@ -730,7 +851,7 @@ function renderAccts(){
           <label class="f"><span>이월 전표 키워드 (기초잔액 → 제외)</span><input type="text" data-f="carryKw" value="${esc(a.carryKw||'')}" placeholder="전기이월,기초이월"></label>
         </div>
         <label class="f"><span>상쇄 전표 쌍 (양수키워드 = 음수키워드) — 같은 |금액|의 쌍을 모집단에서 제외</span><input type="text" data-f="offsetKw" value="${esc(a.offsetKw||'')}" placeholder="수입계산서 = 원재료대체"></label>
-        ${(()=>{const g=a.codes.length?ledgerSideOf(a.codes):null;return g&&g.side!==a.side?`<div class="warn" style="margin:6px 0">원장은 ${g.side==='cr'?'대변':'차변'} 위주(차 ${num(g.dr)} / 대 ${num(g.cr)})인데 양수 방향이 ${a.side==='cr'?'대변':'차변'}으로 설정되어 있습니다. <button class="link" data-act="flipSide">${g.side==='cr'?'대변':'차변'}으로 바꾸기</button></div>`:''})()}
+        ${(()=>{const g=!isSub&&a.codes.length?ledgerSideOf(a.codes):null;return g&&g.side!==a.side?`<div class="warn" style="margin:6px 0">원장은 ${g.side==='cr'?'대변':'차변'} 위주(차 ${num(g.dr)} / 대 ${num(g.cr)})인데 양수 방향이 ${a.side==='cr'?'대변':'차변'}으로 설정되어 있습니다. <button class="link" data-act="flipSide">${g.side==='cr'?'대변':'차변'}으로 바꾸기</button></div>`:''})()}
         ${r&&r.byCode.length?`<div style="font-size:12px;color:var(--ink-2);margin-top:4px">매핑 코드별 당기 발생 (마감·이월 제외) — 재무제표 금액과 맞는 코드만 남기세요</div>
         <table class="grid" style="margin-bottom:8px"><tr><th>코드</th><th>계정명</th><th class="n">건수</th><th class="n">차변</th><th class="n">대변</th></tr>
         ${r.byCode.map(c=>`<tr><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td class="n">${c.n}</td><td class="n">${num(c.dr)}</td><td class="n">${num(c.cr)}</td></tr>`).join('')}</table>`:''}
@@ -746,8 +867,8 @@ function renderAccts(){
         <button class="ghost mini" data-act="addAdj">차이항목 추가</button>
         <div style="margin-top:10px;font-size:12px;color:var(--ink-2)">모집단 제외규칙 — 열(매핑 필드 또는 원장 원본 열) · 조건 · 값(쉼표 = 또는) · <b>적용 범위</b></div>
         <div class="hint" style="margin:0 0 4px">「모집단만」은 별도조서로 넘기는 거래(특수관계자 등)로 재무제표에는 포함되어 대사에 영향 없음. 「대사+모집단」은 거래가 아닌 전표(원가대체·구분='제조' 등)로 대사에서도 빠져 잔여차이가 줄어듦.</div>
-        <div data-ex>${a.ex.map((x,i)=>`<div class="exrow" style="grid-template-columns:0.9fr 1.3fr 0.7fr 1fr 1fr 1fr auto"><input type="text" data-ei="${i}" data-ef="name" value="${esc(x.name)}" placeholder="구분명"><select data-ei="${i}" data-ef="field">${exFieldOptions().map(([v,l])=>`<option value="${v}" ${(x.field||'pdesc')===v?'selected':''}>${esc(l)}</option>`).join('')}</select><select data-ei="${i}" data-ef="op">${EXOPS.map(([v,l])=>`<option value="${v}" ${(x.op||'contains')===v?'selected':''}>${l}</option>`).join('')}</select><input type="text" data-ei="${i}" data-ef="kw" value="${esc(x.kw)}" placeholder="값1,값2"><select data-ei="${i}" data-ef="scope"><option value="pop" ${(x.scope||'pop')==='pop'?'selected':''}>모집단만 (별도조서)</option><option value="both" ${x.scope==='both'?'selected':''}>대사+모집단 (거래 아님)</option></select><input type="text" data-ei="${i}" data-ef="basis" value="${esc(x.basis)}" placeholder="근거"><button class="ghost mini" data-edel="${i}">삭제</button></div>
-          <div class="hint" style="margin:-4px 0 6px">${(x.field||'').startsWith('col:')&&!colAvailable(+x.field.slice(4))?'<span style="color:var(--red)">이 원장 열의 값이 없습니다 — 저장 파일(구버전)에서 복원된 상태라 원장을 다시 올려야 적용됩니다.</span>':(r?`일치 ${r.exHits[i].toLocaleString()}건`+(r.exHits[i]===0?' <span style="color:var(--red)">— 조건에 맞는 행이 없습니다(열·조건·값 확인)</span>':''):'')}</div>`).join('')}</div>
+        <div data-ex>${a.ex.map((x,i)=>`<div class="exrow" style="grid-template-columns:0.9fr 1.3fr 0.7fr 1fr 1fr 1fr auto"><input type="text" data-ei="${i}" data-ef="name" value="${esc(x.name)}" placeholder="구분명"><select data-ei="${i}" data-ef="field">${exFieldOptions(a).map(([v,l])=>`<option value="${v}" ${(x.field||'pdesc')===v?'selected':''}>${esc(l)}</option>`).join('')}</select><select data-ei="${i}" data-ef="op">${EXOPS.map(([v,l])=>`<option value="${v}" ${(x.op||'contains')===v?'selected':''}>${l}</option>`).join('')}</select><input type="text" data-ei="${i}" data-ef="kw" value="${esc(x.kw)}" placeholder="값1,값2"><select data-ei="${i}" data-ef="scope"><option value="pop" ${(x.scope||'pop')==='pop'?'selected':''}>모집단만 (별도조서)</option><option value="both" ${x.scope==='both'?'selected':''}>대사+모집단 (거래 아님)</option></select><input type="text" data-ei="${i}" data-ef="basis" value="${esc(x.basis)}" placeholder="근거"><button class="ghost mini" data-edel="${i}">삭제</button></div>
+          <div class="hint" style="margin:-4px 0 6px">${(x.field||'').startsWith('col:')&&!colAvailable(+x.field.slice(4),a)?'<span style="color:var(--red)">이 원장 열의 값이 없습니다 — 저장 파일(구버전)에서 복원된 상태라 원장을 다시 올려야 적용됩니다.</span>':(r?`일치 ${r.exHits[i].toLocaleString()}건`+(r.exHits[i]===0?' <span style="color:var(--red)">— 조건에 맞는 행이 없습니다(열·조건·값 확인)</span>':''):'')}</div>`).join('')}</div>
         <button class="ghost mini" data-act="addEx">제외규칙 추가</button>
         ${r?`<div style="margin-top:12px"><ol class="chain">
           ${r.carryRows.length?`<li><span>${a.side==='dr'?'차변':'대변'}합계 (원장 전체) <span class="frm">${r.allRows.length.toLocaleString()}건</span></span><span class="val">${num(r.sideSum+r.carrySum)}</span></li>
@@ -777,12 +898,13 @@ function renderAccts(){
     card.querySelector('h3').onclick=()=>{a.open=!a.open;card.toggleAttribute('data-open')};
     card.querySelectorAll('[data-f]').forEach(el=>{
       const commit=()=>{const f=el.dataset.f;let v=el.value;if(f==='fsAmt'||f==='keyPct')v=toNum(v);if(f==='covMult')v=parseFloat(v);
-        if(f==='keyPct'&&(!v))v=null;a[f]=v;if(f==='wp')a._autoWp=false;if(f==='side')a._sideManual=true;if(['side','acctType','risk','rely','carryKw','closeKw','offsetKw','recon'].includes(f))a.seed=null;renderAccts()};
+        if(f==='keyPct'&&(!v))v=null;a[f]=v;if(f==='wp')a._autoWp=false;if(f==='side')a._sideManual=true;if(f==='fsAmt')a._fsManual=true;if(f==='src'){a.cats=[];a.ex=[];if(v.startsWith('sub:')){const rev=guessType(a.name).includes('매출');a.side=rev?'cr':'dr';a.acctType=rev?'AR':'LE';a._sideManual=true}}if(['side','acctType','risk','rely','carryKw','closeKw','offsetKw','recon'].includes(f))a.seed=null;renderAccts()};
       el.onchange=commit;
     });
     const bindCodes=()=>card.querySelectorAll('[data-code]').forEach(cb=>cb.onchange=()=>{const c=cb.dataset.code;if(cb.checked){if(!a.codes.includes(c))a.codes.push(c)}else a.codes=a.codes.filter(x=>x!==c);a.seed=null;autoSide(a);renderAccts()});
     bindCodes();
     const qs=card.querySelector('[data-codesearch]');if(qs)qs.oninput=()=>{a._q=qs.value;card.querySelector('[data-codelist]').innerHTML=codeListHtml(a);bindCodes()};
+    card.querySelectorAll('[data-cat]').forEach(cb=>cb.onchange=()=>{const c=cb.dataset.cat;if(cb.checked){if(!a.cats.includes(c))a.cats.push(c)}else a.cats=a.cats.filter(x=>x!==c);a.seed=null;renderAccts()});
     card.querySelectorAll('[data-ai]').forEach(el=>el.onchange=()=>{const x=a.adj[+el.dataset.ai];x[el.dataset.af]=el.dataset.af==='amt'?toNum(el.value):el.value;renderAccts()});
     card.querySelectorAll('[data-adel]').forEach(b=>b.onclick=()=>{a.adj.splice(+b.dataset.adel,1);renderAccts()});
     card.querySelectorAll('[data-ei]').forEach(el=>el.onchange=()=>{a.ex[+el.dataset.ei][el.dataset.ef]=el.value;a.seed=null;renderAccts()});
@@ -912,7 +1034,7 @@ async function buildUA1000(a){
   const r=a._r||calcAcct(a);const m=matCfg();const kp=keyPctOf(a);
   const company=$('company').value,period=$('period').value,asOf=$('asOf').value,account=a.name,popPeriod=$('popPeriod').value;
   const wb=new ExcelJS.Workbook();wb.calcProperties.fullCalcOnLoad=true;
-  const NM=a.wp;const S1=NM+'-1 표본규모 결정',S2=NM+'-2 Key item 추출',S2A=NM+'-2A 모집단 제외내역',S2B=NM+'-2B 음수 발생분',S3=NM+'-3 표본 추출(MUS)',SL='원장';
+  const NM=a.wp||'UA1000';const S1=NM+'-1 표본규모 결정',S2=NM+'-2 Key item 추출',S2A=NM+'-2A 모집단 제외내역',S2B=NM+'-2B 음수 발생분',S3=NM+'-3 표본 추출(MUS)',SL='원장';
   const w1=wb.addWorksheet(S1),w2=wb.addWorksheet(S2),w2a=r.exc.length?wb.addWorksheet(S2A):null,w2b=r.negRows.length?wb.addWorksheet(S2B):null,w3=wb.addWorksheet(S3),wp=wb.addWorksheet('PBC>>'),wr=wb.addWorksheet(SL);
   [w1,w2,w2a,w2b,w3,wp,wr].forEach(w=>{if(w)w.views=[{showGridLines:false}]});
   [w1,w2,w3].forEach(w=>w.properties.tabColor={argb:C_HDR});[w2a,w2b].forEach(w=>{if(w)w.properties.tabColor={argb:'FFB4530A'}});
@@ -980,7 +1102,8 @@ async function buildUA1000(a){
   put(w2,'B2',`='${S1}'!B2`,{font:T14});put(w2,'B3','=B5&" TOD(2) - Key Item 추출"',{font:T11});put(w2,'B4',`='${S1}'!B4`);put(w2,'B5',`='${S1}'!B5`,{font:B});
   sec(w2,'B6','1. 감사목적');put(w2,'C7','="보고기간말 현재 "&B5&" 발생사실/완전성 검토를 위해 조회대상 관련 원장의 완전성 검토 및 전수조사할 Key Item 추출"');
   sec(w2,'B9','2. 모집단 완전성 검토 및 Key Item 추출');put(w2,'C10','="1) "&B5&" 모집단의 완전성 검토"',{font:B});
-  put(w2,'C11',`="① 모집단: "&"${q(popPeriod)} "&B5&" ${sideK} 발생분 (원장 당기 ${sideK}합계${gross?' — 재무제표(시산) 매입액과 '+sideK+' 발생액 기준으로 대사':''})"`);
+  const srcTxt=a.src&&a.src.startsWith('sub:')?`${(subOf(a.src.slice(4))||{}).name||'보조 원장'} 중 구분값 [${a.cats.join(', ')}] 행`:`원장 당기 ${sideK}합계`;
+  put(w2,'C11',`="① 모집단: "&"${q(popPeriod)} "&B5&" ${sideK} 발생분 (${q(srcTxt)}${gross?' — 재무제표(시산)와 '+sideK+' 발생액 기준으로 대사':''})"`);
   const negTxt=r.negRows.length?` ${sideK} 음수 발생분 ${r.negRows.length}건(${num(r.negSum)})은 MUS 모집단에서 제외하고 ${NM}-2B에서 별도 검토함(우측 조정표).`:'';
   put(w2,'C12',(r.exc.length?`② 회사로부터 원장을 징구하여 ${sideK}합계·대변합계를 집계하고 순액을 재무제표(시산)와 대조함(차이내역 아래 표). 또한 ${a.ex.filter(e=>e.name).map(e=>e.name).join(' 및 ')}은 별도 조서 대상으로 본 조서 모집단에서 제외함(${NM}-2A 참조).`
     :`② 회사로부터 원장을 징구하여 차변합계·대변합계를 집계하고 순액을 재무제표(시산)와 대조함(차이내역은 아래 표). 잔여차이 0 확인.`)+negTxt);
@@ -1030,7 +1153,7 @@ async function buildUA1000(a){
     put(w2,'M21',`='${S2A}'!E${rSum}`,{fmt:N,bd:1});
     let n=rChk+2;sec(w2a,'B'+n,'2. 제외 근거 및 확인필요사항');n++;
     a.ex.filter(e=>e.name).forEach(e=>{put(w2a,'C'+n,`· ${e.name}: ${e.basis}`);n++;put(w2a,'C'+n,'  [확인필요] 해당 거래 전건이 위 별도 조서의 테스트 대상에 포함되었는지 cross-reference 확인',{fill:'FFFFFF00'});n++});
-    n++;put(w2a,'C'+n,'제외규칙[모집단만]: '+a.ex.filter(e=>(e.scope||'pop')==='pop').map(e=>`${e.name||'제외'} = ${exFieldLabel(e.field)} ${(EXOPS.find(o=>o[0]===(e.op||'contains'))||[,'포함'])[1]} "${e.kw}"`).join(' / '),{note:1});n+=2;sec(w2a,'B'+n,'3. 제외 거래 명세');n++;
+    n++;put(w2a,'C'+n,'제외규칙[모집단만]: '+a.ex.filter(e=>(e.scope||'pop')==='pop').map(e=>`${e.name||'제외'} = ${exFieldLabel(e.field,a)} ${(EXOPS.find(o=>o[0]===(e.op||'contains'))||[,'포함'])[1]} "${e.kw}"`).join(' / '),{note:1});n+=2;sec(w2a,'B'+n,'3. 제외 거래 명세');n++;
     ['No.','재무회계 KEY','계정코드','계정명','금액','적요','제외구분'].forEach((h,i)=>put(w2a,String.fromCharCode(67+i)+n,h,{hdr:1}));
     const h0=n+1;[...r.exc].sort((x,y)=>y.amt-x.amt).forEach((x,i)=>{const rr=h0+i;put(w2a,'C'+rr,i+1,{bd:1});put(w2a,'D'+rr,x.key,{bd:1});put(w2a,'E'+rr,x.code,{bd:1});put(w2a,'F'+rr,x.name,{bd:1});put(w2a,'G'+rr,x.amt,{fmt:N,bd:1});put(w2a,'H'+rr,x.pdesc,{bd:1});put(w2a,'I'+rr,x.why,{bd:1})});
     const rt=h0+r.exc.length;put(w2a,'C'+rt,'합계',{res:1});['D','E','F','H','I'].forEach(c=>put(w2a,c+rt,'',{res:1}));put(w2a,'G'+rt,`=SUM(G${h0}:G${rt-1})`,{fmt:N,res:1});
@@ -1076,14 +1199,17 @@ async function buildUA1000(a){
   w3.views=[{state:'frozen',ySplit:22,showGridLines:false}];cfBool(w3,`E${CMA+5}`);cfText(w3,`G23:G${LAST3}`,'1','FFC6EFCE','FF006100');
   /* --- PBC / 원장 --- */
   put(wp,'A1','PBC>>',{font:T14});wp.properties.tabColor={argb:'FFBFBFBF'};
-  writeLedgerSheet(wr,a,r,null,r.allRows,`${sideK} 발생 행(이월·마감·상쇄 제외)이 ${NM}-2 모집단. SAMPLE = Key Item + MUS 선정 · O열 구분: 이월/마감/상쇄`,r.tags);
-  put(w2,'C'+(RK-1),(r.carryRows.length?`※ 이월 전표 ${r.carryRows.length}건(${num(r.carrySum)})은 기초잔액이므로 당기 발생액·모집단에서 제외함. `:'')+(r.closeRows.length?`※ 결산·마감 전표 ${r.closeRows.length}건(차 ${num(r.closeDr)} / 대 ${num(r.closeCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '마감'). `:'')+(r.ruleRows.length?`※ 제외규칙[대사+모집단] ${a.ex.filter(e=>e.scope==='both').map(e=>`${e.name||'제외'}: ${exFieldLabel(e.field)} ${(EXOPS.find(o=>o[0]===(e.op||'contains'))||[,'포함'])[1]} "${e.kw}"`).join(' / ')} 해당 ${r.ruleRows.length}건(차 ${num(r.ruleDr)} / 대 ${num(r.ruleCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '제외'). `:'')+(r.offRows.length?`※ 상쇄 전표 ${r.offRows.length/2|0}쌍(${a.offsetKw})은 양수·음수가 0으로 상쇄되어 모집단에서 제외함(원장 O열 '상쇄').`:''),{note:1});
+  const extra=subExtra(a);
+  const li=writeLedgerSheet(wr,a,r,null,r.allRows,`${sideK} 발생 행(이월·마감·상쇄 제외)이 ${NM}-2 모집단. SAMPLE = Key Item + MUS 선정 · O열 구분: 이월/마감/상쇄`+(extra?' · P열부터 원본 열':''),r.tags,extra);
+  if(extra)writePivotSheet(wb,a,r,SL,LN,li.X0);
+  put(w2,'C'+(RK-1),(r.carryRows.length?`※ 이월 전표 ${r.carryRows.length}건(${num(r.carrySum)})은 기초잔액이므로 당기 발생액·모집단에서 제외함. `:'')+(r.closeRows.length?`※ 결산·마감 전표 ${r.closeRows.length}건(차 ${num(r.closeDr)} / 대 ${num(r.closeCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '마감'). `:'')+(r.ruleRows.length?`※ 제외규칙[대사+모집단] ${a.ex.filter(e=>e.scope==='both').map(e=>`${e.name||'제외'}: ${exFieldLabel(e.field,a)} ${(EXOPS.find(o=>o[0]===(e.op||'contains'))||[,'포함'])[1]} "${e.kw}"`).join(' / ')} 해당 ${r.ruleRows.length}건(차 ${num(r.ruleDr)} / 대 ${num(r.ruleCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '제외'). `:'')+(r.offRows.length?`※ 상쇄 전표 ${r.offRows.length/2|0}쌍(${a.offsetKw})은 양수·음수가 0으로 상쇄되어 모집단에서 제외함(원장 O열 '상쇄').`:''),{note:1});
   wb.definedNames.add(`'${S2}'!$D$${R_CNT}`,'채권수');wb.definedNames.add(`'${S2}'!$C$${D0}:$J$${LAST2+1}`,'키아이템');
   return wb;
 }
 
 const LCOLS=[['key','전표코드'],['code','계정코드'],['name','계정명'],['date','날짜'],['desc','적요란'],['vcode','코드'],['vendor','거래처명'],['biz','사업자번호'],['dr','차변'],['cr','대변'],['bal','잔액'],['proj','프로젝트']];
-function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags){
+function subExtra(a){const sub=a.src&&a.src.startsWith('sub:')?subOf(a.src.slice(4)):null;if(!sub)return null;return {hdr:sub.hdr,val:(r,ci)=>subRawVal(sub,r,ci)}}
+function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags,extra){
   const order=['code','name','date','desc','vcode','vendor','biz','dr','cr','bal','proj','key'];
   const rows=rowsIn||r.all;
   const incIdx=new Map(r.inc.map((x,i)=>[x.idx,i]));
@@ -1092,6 +1218,7 @@ function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags){
   const hdr=['SAMPLE','NO.',...order.map(k=>LCOLS.find(c=>c[0]===k)[1])];
   const ev=evid||[];ev.forEach((e,i)=>{put(ws,col(14+i)+'1','증빙 '+(i+1),{sub:1,al:{horizontal:'center'}});hdr.push(e)});
   if(tags)hdr.push('구분');
+  const X0=hdr.length;if(extra){extra.hdr.forEach(h=>hdr.push(h.label));put(ws,col(X0)+'1','▶ 원본 열',{sub:1})}
   hdr.forEach((h,i)=>put(ws,col(i)+'2',h,{hdr:1}));ws.getRow(2).height=24;
   const listStart=rows.length+5;const sel=[];
   rows.forEach((x,i)=>{
@@ -1099,6 +1226,7 @@ function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags){
     put(ws,'B'+rw,no,{al:{horizontal:'center'}});order.forEach((k,j)=>{const v=x[k];put(ws,col(2+j)+rw,(k==='dr'||k==='cr'||k==='bal')?(v||0):(v??''),{fmt:(k==='dr'||k==='cr'||k==='bal')?N:undefined})});
     ev.forEach((e,j)=>put(ws,col(14+j)+rw,'',{bd:isSel?1:undefined}));
     if(tags){const t=tags.get(x.idx)||'';put(ws,col(14+ev.length)+rw,t,{al:{horizontal:'center'},fill:t?'FFFCE4D6':undefined})}
+    if(extra){extra.hdr.forEach((h,j)=>{const v=extra.val(x,h.i);if(v!=null&&v!=='')ws.getCell(rw,X0+1+j).value=(v instanceof Date)?fmtDate(v):v})}
   });
   const listEnd=listStart+Math.max(1,sel.length)-1;
   rows.forEach((x,i)=>put(ws,'A'+(3+i),`=IFERROR(VLOOKUP(B${3+i},$B$${listStart}:$C$${listEnd},2,0),"")`,{font:B,al:{horizontal:'center'}}));
@@ -1108,7 +1236,34 @@ function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags){
   ws.autoFilter=`A2:${col(1+order.length)}${rows.length+2}`;ws.views=[{state:'frozen',ySplit:2,xSplit:2,showGridLines:false}];
   widths(ws,{A:9,B:7,C:9,D:14,E:11,F:32,G:9,H:24,I:14,J:15,K:15,L:15,M:8,N:16});
   ev.forEach((e,i)=>ws.getColumn(15+i).width=Math.max(12,e.length+2));
-  return {listStart,listEnd,count:sel.length};
+  if(extra)extra.hdr.forEach((h,j)=>ws.getColumn(X0+1+j).width=Math.max(10,Math.min(30,h.label.length+4)));
+  return {listStart,listEnd,count:sel.length,X0};
+}
+function writePivotSheet(wb,a,r,SL,LN,X0){   // 보조원장 집계표: 행=집계열1 × 구분값, 열=집계열2 (수식) + 전체 원장 집계(값)
+  const sub=subOf(a.src.slice(4));const [p0,p1]=sub.pivotCols;const ws=wb.addWorksheet('매출장 집계');ws.views=[{showGridLines:false}];
+  const colOf=ci=>{const j=sub.hdr.findIndex(h=>h.i===ci);return j<0?null:col(X0+j)};
+  const c0=p0>=0?colOf(p0):null,c1=p1>=0?colOf(p1):null;
+  const lab=ci=>(sub.hdr.find(h=>h.i===ci)||{}).label||'';
+  put(ws,'B2',$('company').value,{font:T14});put(ws,'B3',`${a.name} — ${sub.name} 집계`,{font:T11});
+  put(ws,'B5',`1. 본 조서 모집단 행 집계 (${SL} 시트 수식)`,{sec:1});band(ws,5,2,10);
+  const vals0=[...new Set(r.allRows.map(x=>c0?String(subRawVal(sub,x,p0)??''):''))].sort(),vals1=[...new Set(r.allRows.map(x=>c1?String(subRawVal(sub,x,p1)??''):''))].sort();
+  const cats=a.cats;let row=7;
+  put(ws,'B'+row,c0?lab(p0):'전체',{hdr:1});put(ws,'C'+row,'구분값',{hdr:1});vals1.forEach((v,i)=>put(ws,col(3+i)+row,c1?(v||'(비어 있음)'):'금액',{hdr:1}));put(ws,col(3+vals1.length)+row,'총합계',{hdr:1});row++;
+  const amtF=(cond)=>`SUMIFS('${SL}'!$K$3:$K$${LN},${cond})-SUMIFS('${SL}'!$J$3:$J$${LN},${cond})`;
+  const start=row;
+  vals0.forEach(v0=>cats.forEach(cat=>{put(ws,'B'+row,v0||'(비어 있음)',{bd:1});put(ws,'C'+row,cat,{bd:1});
+    vals1.forEach((v1,i)=>{let cond=`'${SL}'!$C$3:$C$${LN},"${cat}"`;if(c0)cond+=`,'${SL}'!$${c0}$3:$${c0}$${LN},"${v0===''?'=':v0.replace(/"/g,'""')}"`;if(c1)cond+=`,'${SL}'!$${c1}$3:$${c1}$${LN},"${v1===''?'=':v1.replace(/"/g,'""')}"`;put(ws,col(3+i)+row,'='+amtF(cond),{fmt:N,bd:1})});
+    put(ws,col(3+vals1.length)+row,`=SUM(${col(3)}${row}:${col(2+vals1.length)}${row})`,{fmt:N,res:1});row++}));
+  put(ws,'B'+row,'총합계',{res:1});put(ws,'C'+row,'',{res:1});for(let i=0;i<=vals1.length;i++)put(ws,col(3+i)+row,`=SUM(${col(3+i)}${start}:${col(3+i)}${row-1})`,{fmt:N,res:1});
+  put(ws,'B'+(row+1),`check: 총합계 = ${SL} 순액`,{note:1});put(ws,col(3+vals1.length)+(row+1),`=ROUND(${col(3+vals1.length)}${row}-(SUM('${SL}'!$K$3:$K$${LN})-SUM('${SL}'!$J$3:$J$${LN})),0)=0`,{al:{horizontal:'center'}});cfBool(ws,`${col(3+vals1.length)}${row+1}`);
+  row+=3;put(ws,'B'+row,`2. ${sub.name} 전체 집계 (모든 구분값, 값)`,{sec:1});band(ws,row,2,10);row+=2;
+  const all0=[...new Set(sub.rows.map(x=>c0?String(subRawVal(sub,x,p0)??''):''))].sort(),allC=sub.cats.map(c=>c.cat),all1=[...new Set(sub.rows.map(x=>c1?String(subRawVal(sub,x,p1)??''):''))].sort();
+  put(ws,'B'+row,c0?lab(p0):'전체',{hdr:1});put(ws,'C'+row,'구분값',{hdr:1});all1.forEach((v,i)=>put(ws,col(3+i)+row,c1?(v||'(비어 있음)'):'금액',{hdr:1}));put(ws,col(3+all1.length)+row,'총합계',{hdr:1});row++;
+  const agg={};sub.rows.forEach(x=>{const k=[c0?String(subRawVal(sub,x,p0)??''):'',x.code,c1?String(subRawVal(sub,x,p1)??''):''].join('\u0001');agg[k]=(agg[k]||0)+x.amt0});
+  const s2=row;all0.forEach(v0=>allC.forEach(cat=>{const vs=all1.map(v1=>agg[[v0,cat,v1].join('\u0001')]||0);if(!vs.some(Boolean))return;put(ws,'B'+row,v0||'(비어 있음)',{bd:1});put(ws,'C'+row,cat,{bd:1});vs.forEach((v,i)=>put(ws,col(3+i)+row,v,{fmt:N,bd:1}));put(ws,col(3+all1.length)+row,`=SUM(${col(3)}${row}:${col(2+all1.length)}${row})`,{fmt:N,res:1});row++}));
+  put(ws,'B'+row,'총합계',{res:1});put(ws,'C'+row,'',{res:1});for(let i=0;i<=all1.length;i++)put(ws,col(3+i)+row,`=SUM(${col(3+i)}${s2}:${col(3+i)}${row-1})`,{fmt:N,res:1});
+  widths(ws,{A:1.3,B:22,C:18});for(let i=0;i<=Math.max(vals1.length,all1.length);i++)ws.getColumn(4+i).width=18;
+  return ws;
 }
 
 /* ============================ STAGE 3 ============================ */
@@ -1144,7 +1299,7 @@ async function buildReq(){
   ready.forEach((a,i)=>{
     const sn=(a.name.replace(/[\[\]\*\?\/\\:]/g,'')+'(양수)').slice(0,31);
     const sh=wb.addWorksheet(sn);const ev=evidOf(a);
-    const info=writeLedgerSheet(sh,a,a._r,ev);
+    const info=writeLedgerSheet(sh,a,a._r,ev,null,null,null,subExtra(a));
     const rw=3+i;put(ws,'B'+rw,a.name,{bd:1});put(ws,'C'+rw,`=COUNTA('${sn}'!C${info.listStart}:C${info.listEnd})`,{bd:1,al:{horizontal:'center'}});
     ev.slice(0,7).forEach((e,j)=>put(ws,col(3+j)+rw,e,{bd:1}));for(let j=ev.length;j<7;j++)put(ws,col(3+j)+rw,undefined,{bd:1});
     const c=ws.getCell('K'+rw);c.value={text:sn+'!A1',hyperlink:`#'${sn}'!A1`};c.font=FONT({color:{argb:'FF0563C1'},underline:true});c.border=BD;
@@ -1157,21 +1312,23 @@ $('dl3').onclick=async()=>{setStatus('샘플 요청 파일 생성 중…');try{c
 /* ============================ 작업 저장 / 불러오기 ============================ */
 const STATE_IDS=()=>[...document.querySelectorAll('input[id],select[id],textarea[id]')].filter(el=>el.type!=='file'&&!el.id.startsWith('lm_'));
 const ROWKEYS=['idx','key','code','name','date','desc','vcode','vendor','biz','dr','cr','bal','proj'];
-function encodeExt(){   // 매핑되지 않은 원본 열 전부를 {ci:{dict,idx}} 로 저장 (복원 후에도 원본 열 규칙 동작)
-  if(S.ledger.ext&&!S.ledger.raw.length)return S.ledger.ext;
-  if(!S.ledger.raw.length)return null;
-  const mapped=new Set(Object.values(S.ledger.map||{}).filter(v=>v>=0));
+function encodeExtOf(src,skipMapped){   // 원본 열을 {ci:{dict,idx}} 로 압축 저장 (복원 후에도 원본 열 규칙·원본 열 출력 동작)
+  if(src.ext&&!src.raw.length)return src.ext;
+  if(!src.raw.length)return null;
+  const mapped=skipMapped?new Set(Object.values(src.map||{}).filter(v=>v>=0)):new Set();
   const out={};
-  (S.ledger.hdr||[]).forEach(h=>{if(mapped.has(h.i))return;const dict=[],m=new Map();const idx=new Array(S.ledger.rows.length);
-    S.ledger.rows.forEach((r,i)=>{const raw=S.ledger.raw[r.idx];const v=raw?raw[h.i]:null;if(v==null||v===''){idx[i]=-1;return}const sv=typeof v==='number'?v:String(v);let k=m.get(sv);if(k==null){k=dict.length;dict.push(sv);m.set(sv,k)}idx[i]=k});
+  (src.hdr||[]).forEach(h=>{if(mapped.has(h.i))return;const dict=[],m=new Map();const idx=new Array(src.rows.length);
+    src.rows.forEach((r,i)=>{const raw=src.raw[r.idx];const v=raw?raw[h.i]:null;if(v==null||v===''){idx[i]=-1;return}const sv=typeof v==='number'?v:(v instanceof Date?fmtDate(v):String(v));let k=m.get(sv);if(k==null){k=dict.length;dict.push(sv);m.set(sv,k)}idx[i]=k});
     if(dict.length)out[h.i]={dict,idx}});
   return out;
 }
+function encodeExt(){return encodeExtOf(S.ledger,true)}
 function snapshot(){
   const EXTC=[];
   const inputs={};STATE_IDS().forEach(el=>inputs[el.id]=el.type==='checkbox'?el.checked:el.value);
-  return {app:'손익계정 TOD 파이프라인',v:'2.9',saved:new Date().toISOString(),inputs,stmts:S.stmts,
+  return {app:'손익계정 TOD 파이프라인',v:'3.0.1',saved:new Date().toISOString(),inputs,stmts:S.stmts,
     ledger:{hdr:S.ledger.hdr,map:S.ledger.map,cols:ROWKEYS,rowsArr:S.ledger.rows.map(r=>ROWKEYS.map(k=>r[k])),ext2:encodeExt(),codes:S.ledger.codes,stat:S.ledger.stat,sheet:$('lSheet').value,hdrRow:$('lHdr').value},
+    subs:S.subs.map(sub=>({id:sub.id,name:sub.name,sheet:sub.sheet,hdrRow:sub.hdrRow,hdr:sub.hdr,map:sub.map,keyCols:sub.keyCols,catCol:sub.catCol,mapText:sub.mapText,pivotCols:sub.pivotCols,stat:sub.stat,cols:SUBKEYS,rowsArr:sub.rows.map(r=>SUBKEYS.map(k=>r[k])),ext2:encodeExtOf(sub,false)})),
     accts:S.accts.map(a=>{const o={...a};delete o._r;return o}),reqTab:REQTAB};
 }
 $('saveJ').onclick=()=>{const j=JSON.stringify(snapshot());download(new TextEncoder().encode(j),`TOD작업_${$('company').value}_${$('period').value}_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.json`,'application/json');setStatus('작업 상태를 저장했습니다.')};
@@ -1191,9 +1348,11 @@ function restore(d){
     $('lSheet').innerHTML=`<option>${esc(d.ledger.sheet||'원장')}</option>`;$('lHdr').value=d.ledger.hdrRow||1;$('ledgerBox').style.display='block';
     renderLMap();const st=S.ledger.stat;$('lStat').textContent=(st?`원장 데이터 ${st.read.toLocaleString()}행 읽음 → 인식 ${st.rows.toLocaleString()}행 (금액 0 행 ${(st.zero||0).toLocaleString()} 포함)`:`${S.ledger.rows.length.toLocaleString()}행`)+` · 계정코드 ${S.ledger.codes.length}개 (저장 파일에서 복원 — 매핑을 바꾸려면 원장 재업로드)`;
   }
-  S.accts=(d.accts||[]).map(a=>({recon:'gross',carryKw:'전기이월,기초이월',closeKw:'결산분개,손익대체,결산대체,마감분개',offsetKw:'',...a,ex:(a.ex||[]).map(e=>({field:'pdesc',op:'contains',scope:'pop',...e})),_r:null,_q:''}));
+  S.subs=(d.subs||[]).map(x=>{const sub={...x,wb:null,raw:[],rows:(x.rowsArr||[]).map((ar,i)=>{const o={};(x.cols||SUBKEYS).forEach((k,j)=>o[k]=ar[j]);o.pos=i;o.src=x.id;o.bal=0;o.proj='';o.code='';o.name='';return o}),ext:x.ext2||null,mapTable:{},cats:[],unmapped:[]};delete sub.rowsArr;delete sub.ext2;return sub});
+  S.accts=(d.accts||[]).map(a=>({recon:'gross',src:'gl',cats:[],carryKw:'전기이월,기초이월',closeKw:'결산분개,손익대체,결산대체,마감분개',offsetKw:'',...a,ex:(a.ex||[]).map(e=>({field:'pdesc',op:'contains',scope:'pop',...e})),_r:null,_q:''}));
   REQTAB=d.reqTab||null;
   S.accts.forEach(a=>autoSide(a));
+  S.subs.forEach(sub=>subClassify(sub));
   recomputeScope();renderAccts();renderReq();
   setStatus(`저장 상태를 불러왔습니다 (${(d.saved||'').slice(0,16).replace('T',' ')}).`);
 }
