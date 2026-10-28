@@ -79,7 +79,8 @@ table.grid input[type=checkbox]{width:auto}
 .chain li .val{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
 .chain li.out{background:var(--deep-bg);font-weight:650}
 .exrow{display:grid;grid-template-columns:1fr 1.2fr 1.4fr auto;gap:6px;margin-bottom:6px}
-.codes{display:flex;flex-wrap:wrap;gap:4px;max-height:90px;overflow:auto;border:1px solid var(--rule);padding:6px}
+.exrow select,.exrow input{min-width:0;font-size:12px;padding:4px 6px}
+.codes{display:flex;flex-wrap:wrap;gap:4px;max-height:140px;overflow:auto;border:1px solid var(--rule);padding:6px;margin-top:6px}
 .codes label{font-size:12px;display:flex;gap:4px;align-items:center;padding:1px 6px;border:1px solid var(--rule-2)}
 .codes input{width:auto}
 .tabs{display:flex;border-bottom:1px solid var(--rule)}
@@ -480,9 +481,10 @@ function recomputeScope(){
 }
 
 /* ============================ STAGE 2 : 원장 ============================ */
-const LFIELDS=[['key','전표코드',['전표코드','전표번호','전표','KEY','키','문서']],['code','계정코드',['계정코드','계정과목코드']],['name','계정명',['계정명','계정과목']],
-  ['date','날짜',['날짜','일자','전표일']],['desc','적요',['적요','내역','설명']],['vcode','거래처코드',['코드']],['vendor','거래처명',['거래처명','거래처']],
-  ['biz','사업자번호',['사업자']],['dr','차변',['차변','입금']],['cr','대변',['대변','출금']],['bal','잔액',['잔액']],['proj','프로젝트',['프로젝트','부서','현장']]];
+const LFIELDS=[['key','전표코드',['전표코드','전표번호','전표','KEY','키','문서']],['code','계정코드',['계정코드','계정과목코드','코드(시산표)','코드']],['name','계정명',['계정명','계정과목(시산표)','계정과목']],
+  ['date','날짜',['날짜','전표일자','일자','전표일']],['desc','적요',['적요','내역','설명']],['vcode','거래처코드',['거래처코드','ven_cd','코드']],['vendor','거래처명',['거래처명','ven_name','거래처']],
+  ['biz','사업자번호',['사업자']],['dr','차변',['차변','입금']],['cr','대변',['대변','출금']],['bal','잔액',['잔액']],['proj','프로젝트',['프로젝트','sl1_project','부서명','부서','현장']]];
+const EXFIELDS=[['pdesc','적요+거래처명'],['desc','적요'],['vendor','거래처명'],['vcode','거래처코드'],['key','전표코드'],['name','계정명'],['date','날짜'],['proj','프로젝트'],['biz','사업자번호'],['any','모든 필드']];
 $('pickL').onclick=()=>$('fileL').click();
 $('fileL').onchange=e=>e.target.files[0]&&loadLedgerFile(e.target.files[0]);
 const dz=$('dropL');
@@ -519,23 +521,25 @@ function parseLedger(){
   const h=Math.max(1,+$('lHdr').value);
   const M={};LFIELDS.forEach(([k])=>M[k]=+$('lm_'+k).value);S.ledger.map=M;
   const g=(r,k)=>M[k]>=0?r[M[k]]:null;
-  const rows=[];
+  const rows=[];let zeroN=0,nocodeN=0,blankN=0;
   for(let i=h;i<S.ledger.raw.length;i++){
-    const r=S.ledger.raw[i]||[];const code=g(r,'code');
-    if(code==null||code==='')continue;
+    const r=S.ledger.raw[i]||[];if(r.every(v=>v==null||v===''))  {blankN++;continue}
+    const code=g(r,'code');
+    if(code==null||code===''){nocodeN++;continue}
     const dr=toNum(g(r,'dr')),cr=toNum(g(r,'cr'));
-    if(!dr&&!cr)continue;
+    if(!dr&&!cr)zeroN++;
     let key=g(r,'key');if(key instanceof Date)key=fmtDate(key);key=key==null?'':String(key);
-    let date=g(r,'date');if(date instanceof Date)date=fmtDate(date);date=date==null?'':String(date);
+    let date=g(r,'date');if(date instanceof Date)date=fmtDate(date);else if(typeof date==='number'&&/^\d{8}$/.test(String(date)))date=String(date).replace(/(\d{4})(\d{2})(\d{2})/,'$1/$2/$3');date=date==null?'':String(date);
     rows.push({idx:i,key,code:String(code).trim(),name:String(g(r,'name')??'').trim(),date,desc:String(g(r,'desc')??''),vcode:String(g(r,'vcode')??''),
       vendor:String(g(r,'vendor')??''),biz:String(g(r,'biz')??''),dr,cr,bal:toNum(g(r,'bal')),proj:String(g(r,'proj')??'')});
   }
-  S.ledger.rows=rows;
+  rows.forEach((r,i)=>r.pos=i);S.ledger.ext=null;
+  S.ledger.rows=rows;S.ledger.stat={read:S.ledger.raw.length-h,rows:rows.length,zero:zeroN,nocode:nocodeN,blank:blankN};
   const m=new Map();rows.forEach(r=>{const o=m.get(r.code)||{code:r.code,name:r.name,n:0,dr:0,cr:0};o.n++;o.dr+=r.dr;o.cr+=r.cr;m.set(r.code,o)});
-  S.ledger.codes=[...m.values()].sort((a,b)=>(b.dr+b.cr)-(a.dr+a.cr));
-  $('lStat').textContent=`${rows.length.toLocaleString()}행 · 계정코드 ${S.ledger.codes.length}개`;
+  S.ledger.codes=[...m.values()].sort((a,b)=>String(a.code).localeCompare(String(b.code),undefined,{numeric:true}));
+  $('lStat').textContent=`원장 데이터 ${S.ledger.stat.read.toLocaleString()}행 읽음 → 인식 ${rows.length.toLocaleString()}행 (금액 0 행 ${zeroN.toLocaleString()} 포함)`+(nocodeN?` · 계정코드 없는 행 ${nocodeN.toLocaleString()} 제외`:'')+(blankN?` · 빈 행 ${blankN.toLocaleString()} 제외`:'')+` · 계정코드 ${S.ledger.codes.length}개`;
   $('st2').textContent=`원장 ${rows.length.toLocaleString()}행 · 계정 ${S.accts.length}개`;
-  S.accts.forEach(a=>{if(!a.codes.length)a.codes=suggestCodes(a.name)});
+  S.accts.forEach(a=>{if(!a.codes.length)a.codes=suggestCodes(a.name);autoSide(a)});
   renderAccts();
 }
 const fmtDate=d=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'/'+p(d.getMonth()+1)+'/'+p(d.getDate())};
@@ -550,7 +554,7 @@ function suggestCodes(name){
 
 /* ============================ STAGE 2 : 계정 카드 ============================ */
 function defaults(){return {risk:$('dRisk').value,rely:$('dRely').value,covMult:parseFloat($('dCov').value),other:$('dOther').value,otherText:$('dOtherText').value}}
-function guessType(name){const n=norm(name);if(/해외|수출/.test(n)&&/매출/.test(n))return '해외매출';if(/매출/.test(n))return '국내매출';if(/매입|가공|원가|비$|료$|수수료/.test(n))return '매입';return '기타'}
+function guessType(name){const n=norm(name);if(/해외|수출/.test(n)&&/매출|수출|판매/.test(n))return '해외매출';if(/매출|수익|판매|수입$|수입액|배당금/.test(n)&&!/매출원가|매입/.test(n))return '국내매출';if(/매입|가공|원가|비$|료$|수수료/.test(n))return '매입';return '기타'}
 function newAcct(name,fsAmt,fromScope){
   const d=defaults(),type=guessType(name);
   return Object.assign({id:Math.random().toString(36).slice(2),name:name.trim(),fromScope:!!fromScope,fsAmt:fsAmt??0,codes:S.ledger.codes.length?suggestCodes(name):[],
@@ -574,7 +578,35 @@ function acctRows(a){
   const sel=S.ledger.rows.filter(r=>a.codes.includes(r.code));
   return sel.map(r=>({...r,amt:a.side==='dr'?r.dr-r.cr:r.cr-r.dr,pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}));
 }
-function matchEx(a,desc){for(const e of a.ex){const k=e.kw.split(',').map(s=>s.trim()).filter(Boolean);if(k.length&&k.some(x=>desc.includes(x)))return e.name||'제외'}return null}
+const EXOPS=[['contains','포함'],['equals','일치'],['starts','시작'],['notContains','불포함'],['empty','비어 있음'],['notEmpty','비어 있지 않음']];
+function exFieldOptions(){   // 매핑 필드 + 원장 원본 열
+  const o=EXFIELDS.map(([v,l])=>[v,l]);
+  (S.ledger.hdr||[]).forEach(h=>o.push(['col:'+h.i,'원장 열 '+col(h.i)+' · '+h.label]));
+  return o;
+}
+function colAvailable(ci){return S.ledger.raw.length>0||!!(S.ledger.ext&&S.ledger.ext[ci])}
+function exFieldLabel(f){const o=exFieldOptions().find(x=>x[0]===f);return o?o[1]:f}
+function exFieldVal(r,field){
+  if(!field||field==='pdesc')return String(r.pdesc??'');
+  if(field==='any')return [r.pdesc,r.vcode,r.key,r.name,r.date,r.proj,r.biz,r.code].map(v=>String(v??'')).join(' | ');
+  if(field.startsWith('col:')){const ci=+field.slice(4);let v;
+    if(S.ledger.raw.length){const raw=S.ledger.raw[r.idx];v=raw?raw[ci]:undefined}
+    else if(S.ledger.ext&&S.ledger.ext[ci]){const e=S.ledger.ext[ci];const k=e.idx[r.pos];v=k==null||k<0?undefined:e.dict[k]}
+    else if(r.ext)v=r.ext[ci];
+    return v==null?'':String(v)}
+  return String(r[field]??'');
+}
+function exTest(e,r){
+  const v=exFieldVal(r,e.field).trim(),vn=norm(v);const op=e.op||'contains';
+  if(op==='empty')return v==='';if(op==='notEmpty')return v!=='';
+  const ks=(e.kw||'').split(',').map(x=>x.trim()).filter(Boolean);if(!ks.length)return false;
+  if(op==='contains')return ks.some(k=>v.includes(k)||vn.includes(norm(k)));
+  if(op==='notContains')return !ks.some(k=>v.includes(k)||vn.includes(norm(k)));
+  if(op==='equals')return ks.some(k=>v===k||vn===norm(k));
+  if(op==='starts')return ks.some(k=>v.startsWith(k)||vn.startsWith(norm(k)));
+  return false;
+}
+function matchEx(a,r,scope){for(const e of a.ex){if((e.scope||'pop')!==scope)continue;if(exTest(e,r))return e.name||'제외'}return null}
 function keyPctOf(a){if(a.keyPct!=null)return a.keyPct;const b=BAND[a.acctType][a.risk][a.rely];return b[1]}
 function calcAcct(a){
   const m=matCfg(),PM=m.PM;
@@ -587,7 +619,12 @@ function calcAcct(a){
   const closeKws=(a.closeKw||'').split(',').map(norm).filter(Boolean);
   const isClose=r=>!isCarry(r)&&closeKws.length>0&&closeKws.some(k=>norm(r.desc).includes(k));
   const closeRows=allRows.filter(isClose),closeDr=closeRows.reduce((s,r)=>s+r.dr,0),closeCr=closeRows.reduce((s,r)=>s+r.cr,0);
-  const cur=allRows.filter(r=>!isCarry(r)&&!isClose(r));         // 당기 발생 (이월·마감 제외)
+  // ①-3 규칙 제외(대사+모집단): 거래가 아닌 전표(예: 구분='제조' 원가대체) — 마감과 동일하게 처리
+  const isRuleBoth=r=>!isCarry(r)&&!isClose(r)&&matchEx(a,r,'both')!==null;
+  const ruleRows=allRows.filter(isRuleBoth);ruleRows.forEach(r=>r.whyBoth=matchEx(a,r,'both'));
+  const exHits=a.ex.map(e=>allRows.filter(r=>exTest(e,r)).length);
+  const ruleDr=ruleRows.reduce((s,r)=>s+r.dr,0),ruleCr=ruleRows.reduce((s,r)=>s+r.cr,0);
+  const cur=allRows.filter(r=>!isCarry(r)&&!isClose(r)&&!isRuleBoth(r));   // 당기 발생 (이월·마감·규칙제외 제외)
   // ② 상쇄 전표 쌍 (예: 수입계산서 = 원재료대체) — 같은 |금액|의 양수·음수 쌍을 모집단에서 제외
   const [okA,okB]=(a.offsetKw||'').split('=').map(x=>norm(x||''));
   const offIdx=new Set();
@@ -598,7 +635,7 @@ function calcAcct(a){
   }
   const offRows=cur.filter(r=>offIdx.has(r.idx)),offPos=offRows.filter(r=>r.amt>0).reduce((s,r)=>s+r.amt,0);
   const work=cur.filter(r=>!offIdx.has(r.idx));
-  const tags=new Map();carryRows.forEach(r=>tags.set(r.idx,'이월'));closeRows.forEach(r=>tags.set(r.idx,'마감'));offRows.forEach(r=>tags.set(r.idx,'상쇄'));
+  const tags=new Map();carryRows.forEach(r=>tags.set(r.idx,'이월'));closeRows.forEach(r=>tags.set(r.idx,'마감'));ruleRows.forEach(r=>tags.set(r.idx,'제외'));offRows.forEach(r=>tags.set(r.idx,'상쇄'));
   // ③ 완전성 대사 — 당기 발생 기준 (이월·마감 제외, 상쇄쌍은 0이므로 포함 무관)
   const drSum=cur.reduce((s,r)=>s+r.dr,0),crSum=cur.reduce((s,r)=>s+r.cr,0);
   const sideSum=a.side==='dr'?drSum:crSum,oppSum=a.side==='dr'?crSum:drSum;
@@ -610,7 +647,7 @@ function calcAcct(a){
   const all=work.filter(r=>r.amt>0);              // 양수 발생분 = 모집단(제외 전)
   const negRows=work.filter(r=>r.amt<0),negSum=negRows.reduce((s,r)=>s+r.amt,0);   // 음수 — MUS 모집단 제외, 2B 별도 검토
   const inc=[],exc=[];
-  all.forEach(r=>{const w=matchEx(a,r.pdesc);if(w)exc.push({...r,why:w});else inc.push(r)});
+  all.forEach(r=>{const w=matchEx(a,r,'pop');if(w)exc.push({...r,why:w});else inc.push(r)});
   const popAll=all.reduce((s,r)=>s+r.amt,0),pop=inc.reduce((s,r)=>s+r.amt,0);
   const kp=keyPctOf(a)/100,T=PM>0?r3(PM*kp):0;
   const keys=inc.filter(r=>r.amt>=T),K=keys.reduce((s,r)=>s+r.amt,0);
@@ -622,7 +659,16 @@ function calcAcct(a){
   inc.forEach((r,i)=>{const f=rem+r.amt;const g=f>0&&interval>0?Math.ceil(f/interval):0;rem=f-g*interval;if(g>0)musSel.push({...r,n:i+1,sel:g})});
   const keyIdx=new Set(inc.map((r,i)=>r.amt>=T?i:-1).filter(i=>i>=0));
   const selIdx=new Set([...keyIdx,...musSel.map(x=>x.n-1)]);
-  return {PM,allRows,carryRows,carrySum,closeRows,closeDr,closeCr,offRows,offPos,tags,sideSum,oppSum,drSum,crSum,net,adjSum,diff,resid,negRows,negSum,byCode:Object.values(byCode),all,inc,exc,popAll,pop,T,kp,keys,K,base,cov,rf,red,factor,rep,residual,interval,seed,musSel,selIdx,total:keys.length+rep};
+  return {PM,allRows,exHits,carryRows,carrySum,closeRows,closeDr,closeCr,ruleRows,ruleDr,ruleCr,offRows,offPos,tags,sideSum,oppSum,drSum,crSum,net,adjSum,diff,resid,negRows,negSum,byCode:Object.values(byCode),all,inc,exc,popAll,pop,T,kp,keys,K,base,cov,rf,red,factor,rep,residual,interval,seed,musSel,selIdx,total:keys.length+rep};
+}
+function ledgerSideOf(codes){   // 매핑 코드의 원장 차·대변 합계로 방향 판정
+  let dr=0,cr=0;S.ledger.rows.forEach(r=>{if(codes.includes(r.code)){dr+=Math.abs(r.dr);cr+=Math.abs(r.cr)}});
+  if(!dr&&!cr)return null;return {dr,cr,side:cr>dr?'cr':'dr'};
+}
+function autoSide(a){
+  if(a._sideManual||!a.codes.length)return;
+  const g=ledgerSideOf(a.codes);if(!g)return;
+  if(g.side!==a.side){a.side=g.side;a.acctType=g.side==='cr'?'AR':'LE';if(!a.evid)a.evType=g.side==='cr'?(/해외|수출/.test(norm(a.name))?'해외매출':'국내매출'):(a.evType==='기타'?'매입':a.evType);a.seed=null}
 }
 function codeSideSum(a,code){   // 코드별 당기 발생액(마감·이월 제외), 계정 방향
   const carry=(a.carryKw||'').split(',').map(norm).filter(Boolean),close=(a.closeKw||'').split(',').map(norm).filter(Boolean);
@@ -637,6 +683,15 @@ function findDiffCombos(a,target){
   const dfs=(i,sum,pick)=>{if(out.length>=8)return;if(Math.abs(sum-T)<=1&&pick.length){out.push([...pick]);return}if(pick.length>=5||i>=cand.length)return;
     for(let j=i;j<cand.length;j++){const nv=sum+Math.round(cand[j].v);if(Math.abs(nv)>Math.abs(T)+1&&Math.sign(nv)===Math.sign(T))continue;pick.push(cand[j]);dfs(j+1,nv,pick);pick.pop();if(out.length>=8)return}};
   dfs(0,0,[]);return out;
+}
+function codeListHtml(a){
+  if(!S.ledger.codes.length)return '<span class="hint">원장을 먼저 올려주세요.</span>';
+  const q=norm(a._q||'').toLowerCase();
+  const hit=S.ledger.codes.filter(c=>!q||String(c.code).toLowerCase().startsWith(q)||norm(c.name).toLowerCase().includes(q));
+  const sel=hit.filter(c=>a.codes.includes(c.code)),rest=hit.filter(c=>!a.codes.includes(c.code));
+  const list=[...sel,...rest].slice(0,150);
+  return list.map(c=>`<label><input type="checkbox" data-code="${esc(c.code)}" ${a.codes.includes(c.code)?'checked':''}>${esc(c.code)} ${esc(c.name)} <span class="hint" style="margin:0">${c.n.toLocaleString()}건</span></label>`).join('')
+    +(hit.length>150?`<span class="hint">… ${hit.length-150}개 더 있음 — 검색어를 좁혀주세요</span>`:'')+(hit.length?'':'<span class="hint">일치하는 코드가 없습니다</span>');
 }
 function renderAccts(){
   const host=$('acctList');
@@ -654,8 +709,10 @@ function renderAccts(){
           <label class="f"><span>양수 방향</span><select data-f="side"><option value="dr" ${a.side==='dr'?'selected':''}>차변(비용·매입)</option><option value="cr" ${a.side==='cr'?'selected':''}>대변(매출·수익)</option></select></label>
           <label class="f"><span>재무제표(시산) 금액</span><input type="text" class="money" data-f="fsAmt" value="${fmtMoney(a.fsAmt)}" inputmode="numeric"></label>
         </div>
-        <span style="font-size:12px;color:var(--ink-2)">원장 계정코드 매핑</span>
-        <div class="codes">${S.ledger.codes.map(c=>`<label><input type="checkbox" data-code="${esc(c.code)}" ${a.codes.includes(c.code)?'checked':''}>${esc(c.code)} ${esc(c.name)} <span class="hint" style="margin:0">${c.n}건</span></label>`).join('')||'<span class="hint">원장을 먼저 올려주세요.</span>'}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:12px;color:var(--ink-2)">원장 계정코드 매핑</span>
+          <input type="text" data-codesearch value="${esc(a._q||'')}" placeholder="코드 앞자리 또는 계정명 검색" style="width:220px;padding:3px 6px;font-size:12px">
+          <span class="hint" style="margin:0">선택 ${a.codes.length}개: ${a.codes.map(c=>`<span class="chip y">${esc(c)}</span>`).join('')||'없음'}</span></div>
+        <div class="codes" data-codelist>${codeListHtml(a)}</div>
         <div class="row3" style="margin-top:10px">
           <label class="f"><span>계정 유형</span><select data-f="acctType"><option value="AR" ${a.acctType==='AR'?'selected':''}>자산·수익</option><option value="LE" ${a.acctType==='LE'?'selected':''}>부채·비용</option></select></label>
           <label class="f"><span>왜곡표시 위험</span><select data-f="risk">${['낮음','중간','높음'].map(k=>`<option ${a.risk===k?'selected':''}>${k}</option>`).join('')}</select></label>
@@ -673,11 +730,12 @@ function renderAccts(){
           <label class="f"><span>이월 전표 키워드 (기초잔액 → 제외)</span><input type="text" data-f="carryKw" value="${esc(a.carryKw||'')}" placeholder="전기이월,기초이월"></label>
         </div>
         <label class="f"><span>상쇄 전표 쌍 (양수키워드 = 음수키워드) — 같은 |금액|의 쌍을 모집단에서 제외</span><input type="text" data-f="offsetKw" value="${esc(a.offsetKw||'')}" placeholder="수입계산서 = 원재료대체"></label>
+        ${(()=>{const g=a.codes.length?ledgerSideOf(a.codes):null;return g&&g.side!==a.side?`<div class="warn" style="margin:6px 0">원장은 ${g.side==='cr'?'대변':'차변'} 위주(차 ${num(g.dr)} / 대 ${num(g.cr)})인데 양수 방향이 ${a.side==='cr'?'대변':'차변'}으로 설정되어 있습니다. <button class="link" data-act="flipSide">${g.side==='cr'?'대변':'차변'}으로 바꾸기</button></div>`:''})()}
         ${r&&r.byCode.length?`<div style="font-size:12px;color:var(--ink-2);margin-top:4px">매핑 코드별 당기 발생 (마감·이월 제외) — 재무제표 금액과 맞는 코드만 남기세요</div>
         <table class="grid" style="margin-bottom:8px"><tr><th>코드</th><th>계정명</th><th class="n">건수</th><th class="n">차변</th><th class="n">대변</th></tr>
         ${r.byCode.map(c=>`<tr><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td class="n">${c.n}</td><td class="n">${num(c.dr)}</td><td class="n">${num(c.cr)}</td></tr>`).join('')}</table>`:''}
         ${(kp<band[0]||kp>band[1])?`<div class="bandnote">기준금액 ${kp}%는 권장 밴드(${band[0]}~${band[1]}%)를 벗어납니다. 조서에 근거를 남기세요.</div>`:''}
-        ${r?`<div style="margin-top:12px;font-size:12px;color:var(--ink-2)">모집단 완전성 — 당기 발생 기준${r.carryRows.length?` · 이월 ${r.carryRows.length}건 ${num(r.carrySum)} 제외`:''}${r.closeRows.length?` · 결산·마감 전표 ${r.closeRows.length}건 제외`:''}${r.oppSum?` · 반대방향(${a.side==='dr'?'대변':'차변'}) 정정 ${num(r.oppSum)}은 2B에서 검토`:''}</div>
+        ${r?`<div style="margin-top:12px;font-size:12px;color:var(--ink-2)">모집단 완전성 — 당기 발생 기준${r.carryRows.length?` · 이월 ${r.carryRows.length}건 ${num(r.carrySum)} 제외`:''}${r.closeRows.length?` · 결산·마감 전표 ${r.closeRows.length}건 제외`:''}${r.ruleRows.length?` · 규칙(대사+모집단) ${r.ruleRows.length}건 제외`:''}${r.oppSum?` · 반대방향(${a.side==='dr'?'대변':'차변'}) 정정 ${num(r.oppSum)}은 2B에서 검토`:''}</div>
         <table class="grid" style="margin-bottom:6px"><tr><th class="n">차변합계</th><th class="n">대변합계</th><th class="n">마감전표 제외</th><th class="n">${a.recon!=='net'?(a.side==='dr'?'차변 발생액':'대변 발생액'):'순액('+(a.side==='dr'?'차−대':'대−차')+')'}</th><th class="n">재무제표</th><th class="n">차이</th><th class="n">차이항목</th><th class="n">잔여차이</th></tr>
         <tr><td class="n">${num(r.drSum)}</td><td class="n">${num(r.crSum)}</td><td class="n" style="color:var(--amber)">${r.closeRows.length?`${r.closeRows.length}건 · 차 ${num(r.closeDr)} / 대 ${num(r.closeCr)}`:'–'}</td><td class="n">${num(r.net)}</td><td class="n">${num(a.fsAmt)}</td><td class="n">${num(r.diff)}</td><td class="n">${num(r.adjSum)}</td>
         <td class="n" style="font-weight:650;color:${r.resid===0?'var(--deep)':'var(--red)'}">${num(r.resid)}${r.resid===0?' ✓':''}</td></tr></table>
@@ -686,13 +744,16 @@ function renderAccts(){
         <div style="margin-top:6px;font-size:12px;color:var(--ink-2)">원장↔재무제표 차이항목 (비고 / 금액)</div>
         <div data-adj>${a.adj.map((x,i)=>`<div class="exrow" style="grid-template-columns:1.3fr 1fr auto"><input type="text" data-ai="${i}" data-af="label" value="${esc(x.label)}" placeholder="비고"><input type="text" class="money" data-ai="${i}" data-af="amt" value="${fmtMoney(x.amt)}" inputmode="numeric"><button class="ghost mini" data-adel="${i}">삭제</button></div>`).join('')}</div>
         <button class="ghost mini" data-act="addAdj">차이항목 추가</button>
-        <div style="margin-top:10px;font-size:12px;color:var(--ink-2)">모집단 제외(별도조서) — 적요·거래처 키워드</div>
-        <div data-ex>${a.ex.map((x,i)=>`<div class="exrow"><input type="text" data-ei="${i}" data-ef="name" value="${esc(x.name)}" placeholder="구분명"><input type="text" data-ei="${i}" data-ef="kw" value="${esc(x.kw)}" placeholder="키워드1,키워드2"><input type="text" data-ei="${i}" data-ef="basis" value="${esc(x.basis)}" placeholder="근거"><button class="ghost mini" data-edel="${i}">삭제</button></div>`).join('')}</div>
+        <div style="margin-top:10px;font-size:12px;color:var(--ink-2)">모집단 제외규칙 — 열(매핑 필드 또는 원장 원본 열) · 조건 · 값(쉼표 = 또는) · <b>적용 범위</b></div>
+        <div class="hint" style="margin:0 0 4px">「모집단만」은 별도조서로 넘기는 거래(특수관계자 등)로 재무제표에는 포함되어 대사에 영향 없음. 「대사+모집단」은 거래가 아닌 전표(원가대체·구분='제조' 등)로 대사에서도 빠져 잔여차이가 줄어듦.</div>
+        <div data-ex>${a.ex.map((x,i)=>`<div class="exrow" style="grid-template-columns:0.9fr 1.3fr 0.7fr 1fr 1fr 1fr auto"><input type="text" data-ei="${i}" data-ef="name" value="${esc(x.name)}" placeholder="구분명"><select data-ei="${i}" data-ef="field">${exFieldOptions().map(([v,l])=>`<option value="${v}" ${(x.field||'pdesc')===v?'selected':''}>${esc(l)}</option>`).join('')}</select><select data-ei="${i}" data-ef="op">${EXOPS.map(([v,l])=>`<option value="${v}" ${(x.op||'contains')===v?'selected':''}>${l}</option>`).join('')}</select><input type="text" data-ei="${i}" data-ef="kw" value="${esc(x.kw)}" placeholder="값1,값2"><select data-ei="${i}" data-ef="scope"><option value="pop" ${(x.scope||'pop')==='pop'?'selected':''}>모집단만 (별도조서)</option><option value="both" ${x.scope==='both'?'selected':''}>대사+모집단 (거래 아님)</option></select><input type="text" data-ei="${i}" data-ef="basis" value="${esc(x.basis)}" placeholder="근거"><button class="ghost mini" data-edel="${i}">삭제</button></div>
+          <div class="hint" style="margin:-4px 0 6px">${(x.field||'').startsWith('col:')&&!colAvailable(+x.field.slice(4))?'<span style="color:var(--red)">이 원장 열의 값이 없습니다 — 저장 파일(구버전)에서 복원된 상태라 원장을 다시 올려야 적용됩니다.</span>':(r?`일치 ${r.exHits[i].toLocaleString()}건`+(r.exHits[i]===0?' <span style="color:var(--red)">— 조건에 맞는 행이 없습니다(열·조건·값 확인)</span>':''):'')}</div>`).join('')}</div>
         <button class="ghost mini" data-act="addEx">제외규칙 추가</button>
         ${r?`<div style="margin-top:12px"><ol class="chain">
           ${r.carryRows.length?`<li><span>${a.side==='dr'?'차변':'대변'}합계 (원장 전체) <span class="frm">${r.allRows.length.toLocaleString()}건</span></span><span class="val">${num(r.sideSum+r.carrySum)}</span></li>
           <li><span>(-) 이월 전표 <span class="frm">${r.carryRows.length}건 · 모집단·대사 제외</span></span><span class="val" style="color:var(--amber)">${num(-r.carrySum)}</span></li>`:''}
-          <li><span>${a.side==='dr'?'차변':'대변'}합계 (당기 발생) <span class="frm">${r.allRows.length-r.carryRows.length} 건</span></span><span class="val">${num(r.sideSum)}</span></li>
+          ${r.ruleRows.length?`<li><span>(-) 규칙 제외 — 대사+모집단 <span class="frm">${r.ruleRows.length.toLocaleString()}건 · 거래 아님</span></span><span class="val" style="color:var(--amber)">${num(-(a.side==='dr'?r.ruleDr:r.ruleCr))}</span></li>`:''}
+          <li><span>${a.side==='dr'?'차변':'대변'}합계 (당기 발생) <span class="frm">${(r.allRows.length-r.carryRows.length-r.closeRows.length-r.ruleRows.length).toLocaleString()} 건</span></span><span class="val">${num(r.sideSum)}</span></li>
           ${r.offRows.length?`<li><span>(-) 상쇄 전표 양수분 <span class="frm">${r.offRows.length/2|0}쌍 · 음수와 상쇄되어 0, 모집단 제외</span></span><span class="val" style="color:var(--amber)">${num(-r.offPos)}</span></li>`:''}
           ${r.negRows.length?`<li><span>(-) ${a.side==='dr'?'차변':'대변'} 음수 발생분 <span class="frm">${r.negRows.length.toLocaleString()}건 · MUS 모집단 제외 → ${a.wp}-2B에서 별도 검토</span></span><span class="val" style="color:var(--amber)">${num(r.negSum)}</span></li>`:''}
           <li><span>양수 발생 합계 = 모집단(제외 전) <span class="frm">${a.side==='dr'?'차변':'대변'}>0 행 ${r.all.length.toLocaleString()}건</span></span><span class="val">${num(r.popAll)}</span></li>
@@ -716,10 +777,12 @@ function renderAccts(){
     card.querySelector('h3').onclick=()=>{a.open=!a.open;card.toggleAttribute('data-open')};
     card.querySelectorAll('[data-f]').forEach(el=>{
       const commit=()=>{const f=el.dataset.f;let v=el.value;if(f==='fsAmt'||f==='keyPct')v=toNum(v);if(f==='covMult')v=parseFloat(v);
-        if(f==='keyPct'&&(!v))v=null;a[f]=v;if(f==='wp')a._autoWp=false;if(['side','acctType','risk','rely','carryKw','closeKw','offsetKw','recon'].includes(f))a.seed=null;renderAccts()};
+        if(f==='keyPct'&&(!v))v=null;a[f]=v;if(f==='wp')a._autoWp=false;if(f==='side')a._sideManual=true;if(['side','acctType','risk','rely','carryKw','closeKw','offsetKw','recon'].includes(f))a.seed=null;renderAccts()};
       el.onchange=commit;
     });
-    card.querySelectorAll('[data-code]').forEach(cb=>cb.onchange=()=>{const c=cb.dataset.code;if(cb.checked){if(!a.codes.includes(c))a.codes.push(c)}else a.codes=a.codes.filter(x=>x!==c);a.seed=null;renderAccts()});
+    const bindCodes=()=>card.querySelectorAll('[data-code]').forEach(cb=>cb.onchange=()=>{const c=cb.dataset.code;if(cb.checked){if(!a.codes.includes(c))a.codes.push(c)}else a.codes=a.codes.filter(x=>x!==c);a.seed=null;autoSide(a);renderAccts()});
+    bindCodes();
+    const qs=card.querySelector('[data-codesearch]');if(qs)qs.oninput=()=>{a._q=qs.value;card.querySelector('[data-codelist]').innerHTML=codeListHtml(a);bindCodes()};
     card.querySelectorAll('[data-ai]').forEach(el=>el.onchange=()=>{const x=a.adj[+el.dataset.ai];x[el.dataset.af]=el.dataset.af==='amt'?toNum(el.value):el.value;renderAccts()});
     card.querySelectorAll('[data-adel]').forEach(b=>b.onclick=()=>{a.adj.splice(+b.dataset.adel,1);renderAccts()});
     card.querySelectorAll('[data-ei]').forEach(el=>el.onchange=()=>{a.ex[+el.dataset.ei][el.dataset.ef]=el.value;a.seed=null;renderAccts()});
@@ -727,12 +790,13 @@ function renderAccts(){
     card.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{
       const act=b.dataset.act;
       if(act==='addAdj'){a.adj.push({label:'',amt:0});renderAccts()}
-      if(act==='addEx'){a.ex.push({name:'',kw:'',basis:''});renderAccts()}
+      if(act==='addEx'){a.ex.push({name:'',field:'pdesc',op:'contains',kw:'',scope:'pop',basis:''});renderAccts()}
       if(act==='reseed'){a.seed=null;renderAccts()}
+      if(act==='flipSide'){a._sideManual=false;autoSide(a);renderAccts()}
       if(act==='findDiff'){const r0=a._r;const combos=findDiffCombos(a,-r0.diff);const box=card.querySelector('[data-diffres]');
         if(!combos.length){box.innerHTML='<div class="hint">1~5개 코드 조합으로는 차이와 일치하는 것을 찾지 못했습니다. 차이항목으로 입력하세요.</div>';return}
         box.innerHTML=combos.map((cb,i)=>`<div style="margin:4px 0"><button class="ghost mini" data-combo="${i}">이 조합 추가</button> ${cb.map(c=>`<span class="chip">${esc(c.code)} ${esc(c.name)} ${num(c.v)}</span>`).join(' + ')}</div>`).join('');
-        box.querySelectorAll('[data-combo]').forEach(bt=>bt.onclick=()=>{combos[+bt.dataset.combo].forEach(c=>{if(!a.codes.includes(c.code))a.codes.push(c.code)});a.seed=null;renderAccts()});}
+        box.querySelectorAll('[data-combo]').forEach(bt=>bt.onclick=()=>{combos[+bt.dataset.combo].forEach(c=>{if(!a.codes.includes(c.code))a.codes.push(c.code)});a.seed=null;autoSide(a);renderAccts()});}
       if(act==='del'){S.accts=S.accts.filter(x=>x!==a);renderAccts()}
       if(act==='dl'){b.disabled=true;setStatus(`${a.name} 조서 생성 중…`);try{await downloadUA1000(a)}catch(e){setStatus('생성 실패: '+e.message);console.error(e)}b.disabled=false}
     });
@@ -834,6 +898,7 @@ $('dl1').onclick=async()=>{setStatus('인스코프 조서 생성 중…');try{co
 
 /* ============================ STAGE 2 : UA1000 엑셀 ============================ */
 async function downloadUA1000(a){
+  if(!a._r||!a._r.inc.length){setStatus(`${a.name}: 모집단이 0건이라 조서를 만들 수 없습니다 (매핑·제외규칙 확인).`);return}
   const wb=await buildUA1000(a);
   download(await wb.xlsx.writeBuffer(),`TOD_${a.name}_${$('company').value}_${$('period').value}.xlsx`);
   setStatus(`${a.name} — 표본 ${a._r.total}건 (Key ${a._r.keys.length} + Rep ${a._r.rep}) 내려받음`);
@@ -856,7 +921,7 @@ async function buildUA1000(a){
   const relyTxt=a.rely==='Y'?'의존하기로':'의존하지 않기로';const sideK=a.side==='dr'?'차변':'대변';
   const LN=2+r.allRows.length;   // 원장 시트 마지막 데이터행
   const TG=`'${SL}'!O3:O${LN}`,JJ=`'${SL}'!J3:J${LN}`,KK=`'${SL}'!K3:K${LN}`,SS=a.side==='dr'?JJ:KK;
-  const gross=a.recon!=='net';const OO=a.side==='dr'?KK:JJ;const XC=`${TG},"<>이월",${TG},"<>마감"`;
+  const gross=a.recon!=='net';const OO=a.side==='dr'?KK:JJ;const XC=`${TG},"<>이월",${TG},"<>마감",${TG},"<>제외"`;
   const title=(w,t)=>{put(w,'B2',company,{font:T14});put(w,'B3',t,{font:T11});put(w,'B4',period);};
   const sec=(w,addr,t)=>{put(w,addr,t,{sec:1});band(w,+addr.replace(/\D/g,''),2,10)};
   /* --- 1 --- */
@@ -927,10 +992,11 @@ async function buildUA1000(a){
   put(w2,'I'+R_CHK,'잔여차이 (=0 check)',{res:1});put(w2,'J'+R_CHK,`=ROUND(H14+SUM(J14:J${13+adjN}),0)=0`,{res:1,al:{horizontal:'center'}});
   put(w2,'L13','모집단 조정',{sub:1});put(w2,'M13','',{sub:1});
   put(w2,'L14',`${sideK}합계 (원장 전체)`,{bd:1});put(w2,'M14',`=SUM(${SS})`,{fmt:N,bd:1});
-  put(w2,'L15','(-) 이월 전표 (기초잔액) · 결산·마감 전표 (거래 아님)',{bd:1});put(w2,'M15',`=-SUMIF(${TG},"이월",${SS})-SUMIF(${TG},"마감",${SS})`,{fmt:N,bd:1});
+  put(w2,'L15','(-) 이월 전표 · 결산·마감 전표 · 규칙 제외(대사+모집단)',{bd:1});put(w2,'M15',`=-SUMIF(${TG},"이월",${SS})-SUMIF(${TG},"마감",${SS})-SUMIF(${TG},"제외",${SS})`,{fmt:N,bd:1});
   put(w2,'L16',`${sideK}합계 (당기 발생)`,{bd:1});put(w2,'M16','=M14+M15',{fmt:N,bd:1,font:B});
   put(w2,'L24',`참고: 결산·마감 전표 (${a.side==='dr'?'대변':'차변'}, 대사·모집단 제외)`,{note:1});put(w2,'M24',`=SUMIF(${TG},"마감",${OO})`,{fmt:N,note:1});
   put(w2,'L25',`참고: 반대방향(${a.side==='dr'?'대변':'차변'}) 정정 발생분 (${w2b?NM+'-2B':'별도'} 검토)`,{note:1});put(w2,'M25',`=SUMIFS(${OO},${XC})`,{fmt:N,note:1});
+  put(w2,'L26',`참고: 규칙 제외(대사+모집단) ${sideK} / 반대방향`,{note:1});put(w2,'M26',`=SUMIF(${TG},"제외",${SS})`,{fmt:N,note:1});put(w2,'N26',`=SUMIF(${TG},"제외",${OO})`,{fmt:N,note:1});
   put(w2,'L17','(-) 상쇄 전표 양수분 (모집단 제외)',{bd:1});put(w2,'M17',`=-SUMIFS(${SS},${TG},"상쇄",${SS},">0")`,{fmt:N,bd:1});
   put(w2,'L18','(+) 상쇄 전표 음수분 (양수와 상쇄 → 합계 0)',{bd:1});put(w2,'M18',`=-SUMIFS(${SS},${TG},"상쇄",${SS},"<0")`,{fmt:N,bd:1});
   put(w2,'L19',`(-) ${sideK} 음수 발생분 (MUS 제외·별도 검토${w2b?', '+NM+'-2B':''})`,{bd:1});put(w2,'M19',w2b?`='${S2B}'!E8`:`=SUMIFS(${SS},${SS},"<0",${TG},"<>상쇄",${XC})-SUMIFS(${OO},${TG},"<>상쇄",${XC})`,{fmt:N,bd:1});
@@ -964,7 +1030,7 @@ async function buildUA1000(a){
     put(w2,'M21',`='${S2A}'!E${rSum}`,{fmt:N,bd:1});
     let n=rChk+2;sec(w2a,'B'+n,'2. 제외 근거 및 확인필요사항');n++;
     a.ex.filter(e=>e.name).forEach(e=>{put(w2a,'C'+n,`· ${e.name}: ${e.basis}`);n++;put(w2a,'C'+n,'  [확인필요] 해당 거래 전건이 위 별도 조서의 테스트 대상에 포함되었는지 cross-reference 확인',{fill:'FFFFFF00'});n++});
-    n++;sec(w2a,'B'+n,'3. 제외 거래 명세');n++;
+    n++;put(w2a,'C'+n,'제외규칙[모집단만]: '+a.ex.filter(e=>(e.scope||'pop')==='pop').map(e=>`${e.name||'제외'} = ${exFieldLabel(e.field)} ${(EXOPS.find(o=>o[0]===(e.op||'contains'))||[,'포함'])[1]} "${e.kw}"`).join(' / '),{note:1});n+=2;sec(w2a,'B'+n,'3. 제외 거래 명세');n++;
     ['No.','재무회계 KEY','계정코드','계정명','금액','적요','제외구분'].forEach((h,i)=>put(w2a,String.fromCharCode(67+i)+n,h,{hdr:1}));
     const h0=n+1;[...r.exc].sort((x,y)=>y.amt-x.amt).forEach((x,i)=>{const rr=h0+i;put(w2a,'C'+rr,i+1,{bd:1});put(w2a,'D'+rr,x.key,{bd:1});put(w2a,'E'+rr,x.code,{bd:1});put(w2a,'F'+rr,x.name,{bd:1});put(w2a,'G'+rr,x.amt,{fmt:N,bd:1});put(w2a,'H'+rr,x.pdesc,{bd:1});put(w2a,'I'+rr,x.why,{bd:1})});
     const rt=h0+r.exc.length;put(w2a,'C'+rt,'합계',{res:1});['D','E','F','H','I'].forEach(c=>put(w2a,c+rt,'',{res:1}));put(w2a,'G'+rt,`=SUM(G${h0}:G${rt-1})`,{fmt:N,res:1});
@@ -1011,7 +1077,7 @@ async function buildUA1000(a){
   /* --- PBC / 원장 --- */
   put(wp,'A1','PBC>>',{font:T14});wp.properties.tabColor={argb:'FFBFBFBF'};
   writeLedgerSheet(wr,a,r,null,r.allRows,`${sideK} 발생 행(이월·마감·상쇄 제외)이 ${NM}-2 모집단. SAMPLE = Key Item + MUS 선정 · O열 구분: 이월/마감/상쇄`,r.tags);
-  put(w2,'C'+(RK-1),(r.carryRows.length?`※ 이월 전표 ${r.carryRows.length}건(${num(r.carrySum)})은 기초잔액이므로 당기 발생액·모집단에서 제외함. `:'')+(r.closeRows.length?`※ 결산·마감 전표 ${r.closeRows.length}건(차 ${num(r.closeDr)} / 대 ${num(r.closeCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '마감'). `:'')+(r.offRows.length?`※ 상쇄 전표 ${r.offRows.length/2|0}쌍(${a.offsetKw})은 양수·음수가 0으로 상쇄되어 모집단에서 제외함(원장 O열 '상쇄').`:''),{note:1});
+  put(w2,'C'+(RK-1),(r.carryRows.length?`※ 이월 전표 ${r.carryRows.length}건(${num(r.carrySum)})은 기초잔액이므로 당기 발생액·모집단에서 제외함. `:'')+(r.closeRows.length?`※ 결산·마감 전표 ${r.closeRows.length}건(차 ${num(r.closeDr)} / 대 ${num(r.closeCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '마감'). `:'')+(r.ruleRows.length?`※ 제외규칙[대사+모집단] ${a.ex.filter(e=>e.scope==='both').map(e=>`${e.name||'제외'}: ${exFieldLabel(e.field)} ${(EXOPS.find(o=>o[0]===(e.op||'contains'))||[,'포함'])[1]} "${e.kw}"`).join(' / ')} 해당 ${r.ruleRows.length}건(차 ${num(r.ruleDr)} / 대 ${num(r.ruleCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '제외'). `:'')+(r.offRows.length?`※ 상쇄 전표 ${r.offRows.length/2|0}쌍(${a.offsetKw})은 양수·음수가 0으로 상쇄되어 모집단에서 제외함(원장 O열 '상쇄').`:''),{note:1});
   wb.definedNames.add(`'${S2}'!$D$${R_CNT}`,'채권수');wb.definedNames.add(`'${S2}'!$C$${D0}:$J$${LAST2+1}`,'키아이템');
   return wb;
 }
@@ -1090,10 +1156,22 @@ $('dl3').onclick=async()=>{setStatus('샘플 요청 파일 생성 중…');try{c
 
 /* ============================ 작업 저장 / 불러오기 ============================ */
 const STATE_IDS=()=>[...document.querySelectorAll('input[id],select[id],textarea[id]')].filter(el=>el.type!=='file'&&!el.id.startsWith('lm_'));
+const ROWKEYS=['idx','key','code','name','date','desc','vcode','vendor','biz','dr','cr','bal','proj'];
+function encodeExt(){   // 매핑되지 않은 원본 열 전부를 {ci:{dict,idx}} 로 저장 (복원 후에도 원본 열 규칙 동작)
+  if(S.ledger.ext&&!S.ledger.raw.length)return S.ledger.ext;
+  if(!S.ledger.raw.length)return null;
+  const mapped=new Set(Object.values(S.ledger.map||{}).filter(v=>v>=0));
+  const out={};
+  (S.ledger.hdr||[]).forEach(h=>{if(mapped.has(h.i))return;const dict=[],m=new Map();const idx=new Array(S.ledger.rows.length);
+    S.ledger.rows.forEach((r,i)=>{const raw=S.ledger.raw[r.idx];const v=raw?raw[h.i]:null;if(v==null||v===''){idx[i]=-1;return}const sv=typeof v==='number'?v:String(v);let k=m.get(sv);if(k==null){k=dict.length;dict.push(sv);m.set(sv,k)}idx[i]=k});
+    if(dict.length)out[h.i]={dict,idx}});
+  return out;
+}
 function snapshot(){
+  const EXTC=[];
   const inputs={};STATE_IDS().forEach(el=>inputs[el.id]=el.type==='checkbox'?el.checked:el.value);
-  return {app:'손익계정 TOD 파이프라인',v:'2.5',saved:new Date().toISOString(),inputs,stmts:S.stmts,
-    ledger:{hdr:S.ledger.hdr,map:S.ledger.map,rows:S.ledger.rows,codes:S.ledger.codes,sheet:$('lSheet').value,hdrRow:$('lHdr').value},
+  return {app:'손익계정 TOD 파이프라인',v:'2.9',saved:new Date().toISOString(),inputs,stmts:S.stmts,
+    ledger:{hdr:S.ledger.hdr,map:S.ledger.map,cols:ROWKEYS,rowsArr:S.ledger.rows.map(r=>ROWKEYS.map(k=>r[k])),ext2:encodeExt(),codes:S.ledger.codes,stat:S.ledger.stat,sheet:$('lSheet').value,hdrRow:$('lHdr').value},
     accts:S.accts.map(a=>{const o={...a};delete o._r;return o}),reqTab:REQTAB};
 }
 $('saveJ').onclick=()=>{const j=JSON.stringify(snapshot());download(new TextEncoder().encode(j),`TOD작업_${$('company').value}_${$('period').value}_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.json`,'application/json');setStatus('작업 상태를 저장했습니다.')};
@@ -1104,13 +1182,18 @@ function restore(d){
   Object.entries(d.inputs).forEach(([id,v])=>{const el=$(id);if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=v});
   $('pmMode').onchange();
   S.stmts=d.stmts||S.stmts;
-  if(d.ledger&&d.ledger.rows&&d.ledger.rows.length){
-    S.ledger.raw=[];S.ledger.hdr=d.ledger.hdr||[];S.ledger.map=d.ledger.map||{};S.ledger.rows=d.ledger.rows;S.ledger.codes=d.ledger.codes||[];
+  const L=d.ledger||{};const lrows=L.rows||(L.rowsArr?L.rowsArr.map(ar=>{const o={};(L.cols||ROWKEYS).forEach((k,i)=>o[k]=ar[i]);return o}):[]);
+  if(lrows.length){
+    S.ledger.raw=[];S.ledger.hdr=L.hdr||[];S.ledger.map=L.map||{};S.ledger.rows=lrows;S.ledger.codes=L.codes||[];S.ledger.stat=L.stat||null;
+    lrows.forEach((r,i)=>r.pos=i);
+    if(L.ext2)S.ledger.ext=L.ext2;
+    else if(L.extCols&&L.ext){lrows.forEach((r,i)=>{r.ext={};L.extCols.forEach((ci,j)=>r.ext[ci]=L.ext[i][j])})}
     $('lSheet').innerHTML=`<option>${esc(d.ledger.sheet||'원장')}</option>`;$('lHdr').value=d.ledger.hdrRow||1;$('ledgerBox').style.display='block';
-    renderLMap();$('lStat').textContent=`${S.ledger.rows.length.toLocaleString()}행 · 계정코드 ${S.ledger.codes.length}개 (저장 파일에서 복원 — 매핑을 바꾸려면 원장 재업로드)`;
+    renderLMap();const st=S.ledger.stat;$('lStat').textContent=(st?`원장 데이터 ${st.read.toLocaleString()}행 읽음 → 인식 ${st.rows.toLocaleString()}행 (금액 0 행 ${(st.zero||0).toLocaleString()} 포함)`:`${S.ledger.rows.length.toLocaleString()}행`)+` · 계정코드 ${S.ledger.codes.length}개 (저장 파일에서 복원 — 매핑을 바꾸려면 원장 재업로드)`;
   }
-  S.accts=(d.accts||[]).map(a=>({recon:'gross',carryKw:'전기이월,기초이월',closeKw:'결산분개,손익대체,결산대체,마감분개',offsetKw:'',...a,_r:null}));
+  S.accts=(d.accts||[]).map(a=>({recon:'gross',carryKw:'전기이월,기초이월',closeKw:'결산분개,손익대체,결산대체,마감분개',offsetKw:'',...a,ex:(a.ex||[]).map(e=>({field:'pdesc',op:'contains',scope:'pop',...e})),_r:null,_q:''}));
   REQTAB=d.reqTab||null;
+  S.accts.forEach(a=>autoSide(a));
   recomputeScope();renderAccts();renderReq();
   setStatus(`저장 상태를 불러왔습니다 (${(d.saved||'').slice(0,16).replace('T',' ')}).`);
 }
