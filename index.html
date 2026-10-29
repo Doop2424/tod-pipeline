@@ -6,6 +6,7 @@
 <title>손익계정 TOD 파이프라인</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root{
   --paper:#F7F7F5;--card:#fff;--ink:#1B1D1C;--ink-2:#5A605C;--rule:#D8DAD6;--rule-2:#EDEEEB;
@@ -86,16 +87,49 @@ table.grid input[type=checkbox]{width:auto}
 .tabs{display:flex;border-bottom:1px solid var(--rule)}
 .tabs button{background:none;border:none;border-bottom:2px solid transparent;color:var(--ink-2);padding:8px 12px;font-size:12.5px}
 .tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--deep);font-weight:600}
+/* 버전·도움말 */
+.ver{font-family:var(--mono);font-size:12px;color:var(--deep);border:1px solid var(--deep);padding:2px 8px;border-radius:2px;background:var(--deep-bg)}
+.topbtns{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button.help{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--ink-2);color:var(--ink-2);font-size:11px;font-weight:650;margin-left:auto}
+button.help:hover{color:var(--deep);border-color:var(--deep)}
+section.panel.col>h2{cursor:pointer}
+section.panel.col>h2::before{content:'▸';font-size:11px;color:var(--ink-2);margin-right:2px;transition:transform .15s}
+section.panel.col[data-open]>h2::before{transform:rotate(90deg)}
+section.panel.col>.body{display:none}section.panel.col[data-open]>.body{display:block}
+details.adv{border:1px dashed var(--rule);padding:6px 10px;margin:8px 0}
+details.adv>summary{cursor:pointer;font-size:12.5px;color:var(--ink-2);font-weight:600}
+details.adv[open]>summary{margin-bottom:6px}
+.tip{position:fixed;z-index:50;max-width:340px;background:#1B1D1C;color:#fff;font-size:12px;line-height:1.45;padding:8px 10px;border-radius:3px;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none;white-space:pre-line}
+.tip b{color:#FFD28A}
+[data-tip]{cursor:help}
+label.f[data-tip]>span::after{content:' ⓘ';font-size:10px;color:var(--ink-2)}
+.next{font-size:12px;color:var(--amber);font-weight:500;margin-left:8px}
+.guide{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+.guide div{background:#fff;border:1px solid var(--rule);padding:10px 12px;font-size:12.5px}
+.guide .n{font-family:var(--mono);color:var(--deep);font-weight:650;margin-right:6px}
+.guide .ok{color:var(--deep)}
+@media (max-width:800px){.guide{grid-template-columns:1fr}}
+#manual{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40;display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto}
+#manual[data-on]{display:flex}
+#manual .box{background:#fff;max-width:860px;width:100%;max-height:calc(100vh - 60px);overflow:auto;border:1px solid var(--rule);padding:22px 28px;line-height:1.6;font-size:13.5px}
+#manual h2{font-size:16px;margin:18px 0 6px;padding-top:14px;border-top:1px solid var(--rule-2)}
+#manual h2:first-of-type{border-top:none;padding-top:0}
+#manual h3{font-size:13.5px;margin:12px 0 4px}
+#manual p,#manual li{margin:3px 0}
+#manual code{font-family:var(--mono);font-size:12px;background:var(--rule-2);padding:0 4px}
+#manual .toc a{margin-right:12px;color:var(--deep);font-size:12.5px}
 </style>
 </head>
 <body>
 <div class="wrap">
 <header class="top">
   <div>
-    <h1>손익계정 TOD 파이프라인</h1>
-    <p>인스코프 → 계정별 표본규모·추출 → 샘플 요청, 세 단계를 한 흐름으로 이어갑니다. 단계마다 엑셀을 내려받을 수 있고, 조서는 수식이 살아 있습니다.</p>
+    <h1>손익계정 TOD 파이프라인 <span class="ver" id="verBadge"></span></h1>
+    <p>인스코프 → 계정별 표본규모·추출 → 샘플 요청, 세 단계를 한 흐름으로 이어갑니다. 단계마다 엑셀을 내려받을 수 있고, 조서는 수식이 살아 있습니다. 항목에 마우스를 올리면 설명이 뜹니다.</p>
   </div>
+  <div class="topbtns"><button class="ghost" id="openManual">사용 설명서</button></div>
 </header>
+<div class="guide" id="guide"></div>
 
 <div class="stages" role="tablist">
   <button role="tab" aria-selected="true" data-stage="1"><span class="t">① 인스코프</span><span class="s" id="st1">계정-시산 미입력</span></button>
@@ -107,7 +141,7 @@ table.grid input[type=checkbox]{width:auto}
 <div class="stage" data-stage="1" data-on>
 <div class="cols">
 <div>
-  <section class="panel"><h2>조서 기본정보</h2><div class="body">
+  <section class="panel"><h2>조서 기본정보 <button class="help" data-help="m1-basic">?</button></h2><div class="body">
     <div class="row2">
       <label class="f"><span>회사명</span><input type="text" id="company" value="티플랙스"></label>
       <label class="f"><span>회사명(공식)</span><input type="text" id="companyFull" value="㈜티플랙스"></label>
@@ -125,7 +159,7 @@ table.grid input[type=checkbox]{width:auto}
     <label class="f"><span>모집단 기간 서술(②·③에서 사용)</span><input type="text" id="popPeriod" value="2025년 1~3분기에 발생한"></label>
   </div></section>
 
-  <section class="panel"><h2>중요성</h2><div class="body">
+  <section class="panel"><h2>중요성 <button class="help" data-help="m1-mat">?</button></h2><div class="body">
     <label class="f"><span>산정방식</span><select id="pmMode"><option value="bench">벤치마크 × 비율 (TM→PM→SAD)</option><option value="direct">직접입력 (TM/PM/SAD)</option></select></label>
     <div id="benchBox">
       <div class="row2">
@@ -153,7 +187,7 @@ table.grid input[type=checkbox]{width:auto}
     <label class="f"><span>통제위험 판단 문구</span><textarea id="ctrlNote" rows="3">2024 회계연도의 회사 내부회계관리제도 설계, 운영평가에 대한 독립적 감사절차 수행결과 유의적 미비점 이상의 발견사항이 식별되지 않으므로 통제위험은 낮은것으로 판단함 (All rely on control)</textarea></label>
   </div></section>
 
-  <section class="panel"><h2>계정-시산 입력</h2><div class="body">
+  <section class="panel"><h2>계정-시산 입력 <button class="help" data-help="m1-stmt">?</button></h2><div class="body">
     <p class="hint" style="margin-top:0">엑셀에서 「계정과목 · 금액」 두 열을 복사해 붙이면 바로 반영됩니다(탭·공백 구분 모두 인식). 로마숫자(Ⅰ~Ⅹ) 행, 합계·이익 행, 아래 행이 더 들여쓰기된 행은 소계로 자동 인식되어 테스트에서 빠집니다.</p>
     <label class="f"><span>(1) 제조원가명세서 — 붙여넣기</span><textarea id="paste1" rows="4" placeholder="원재료비&#9;118594578327&#10;    기초 원재료 재고액&#9;42495428581"></textarea></label>
     <label class="f"><span>(2) 손익계산서 — 붙여넣기</span><textarea id="paste2" rows="4" placeholder="Ⅰ. 매출액&#9;156801814830&#10;    상품매출&#9;23100111355"></textarea></label>
@@ -174,7 +208,7 @@ table.grid input[type=checkbox]{width:auto}
     </div>
   </div></section>
 
-  <section class="panel"><h2>TOD 외 절차 목록 · 자동추정 규칙</h2><div class="body">
+  <section class="panel col"><h2>TOD 외 절차 목록 · 자동추정 규칙 <button class="help" data-help="m1-proc">?</button></h2><div class="body">
     <p class="hint" style="margin-top:0">여기 있는 절차가 표의 드롭다운에 나옵니다. PM 초과 계정은 키워드로 자동 선택되며, 드롭다운에서 절차를 고르면 그 계정은 최종 TEST에서 빠집니다. 한 줄에 「키워드1,키워드2 = 절차」(키워드 없이 「= 절차」만 써도 목록에 추가).</p>
     <textarea id="procRules" rows="8">기초,기말 = 재고실사입회
 상여 = 상여지급 TEST
@@ -212,7 +246,7 @@ table.grid input[type=checkbox]{width:auto}
 <div class="stage" data-stage="2">
 <div class="cols">
 <div>
-  <section class="panel"><h2>전체 원장</h2><div class="body">
+  <section class="panel"><h2>총계정원장 <button class="help" data-help="m2-ledger">?</button></h2><div class="body">
     <div id="dropL" class="drop">원장 엑셀(회사 ERP 추출)을 끌어놓거나 <button class="ghost mini" id="pickL">파일 선택</button>
       <input type="file" id="fileL" accept=".xlsx,.xls,.csv" hidden></div>
     <div id="ledgerBox" style="display:none;margin-top:10px">
@@ -225,13 +259,13 @@ table.grid input[type=checkbox]{width:auto}
     </div>
   </div></section>
 
-  <section class="panel"><h2>보조 원장 (매출장 등 — 계정별 모집단 원천)</h2><div class="body">
+  <section class="panel col" data-open><h2>보조 원장 (매출장·매입장 등) <button class="help" data-help="m2-sub">?</button></h2><div class="body">
     <p class="hint" style="margin-top:0">총계정원장 전표가 월별 집계라 샘플링이 안 되는 계정(매출·매입 등)은 매출장·매입장 같은 세부 원장을 올려 모집단으로 씁니다. 여러 개를 올릴 수 있고(원장마다 패널이 생김), 카드의 「모집단 원천」에서 고릅니다. 행마다 「구분값」(상품매출·제품매출…)을 정하고, 카드에서 원천을 이 원장으로 바꾼 뒤 구분값을 고르면 같은 조서가 나옵니다.</p>
     <div id="dropS" class="drop">보조 원장 엑셀을 끌어놓거나 <button class="ghost mini" id="pickS">파일 선택</button><input type="file" id="fileS" accept=".xlsx,.xls,.csv" hidden></div>
     <div id="subList"></div>
   </div></section>
 
-  <section class="panel"><h2>공통 파라미터</h2><div class="body">
+  <section class="panel col"><h2>공통 파라미터 (새 카드 초기값) <button class="help" data-help="m2-param">?</button></h2><div class="body">
     <p class="hint" style="margin-top:0">새 계정 카드의 초기값입니다. 카드에서 계정별로 바꿀 수 있습니다.</p>
     <div class="row2">
       <label class="f"><span>왜곡표시 위험</span><select id="dRisk"><option>낮음</option><option selected>중간</option><option>높음</option></select></label>
@@ -246,7 +280,7 @@ table.grid input[type=checkbox]{width:auto}
     <button class="ghost mini" id="applyDefaults">모든 카드에 공통값 다시 적용</button>
   </div></section>
 
-  <section class="panel"><h2>계정 추가</h2><div class="body">
+  <section class="panel col"><h2>계정 추가 (인스코프 외 계정) <button class="help" data-help="m2-card">?</button></h2><div class="body">
     <p class="hint" style="margin-top:0">①에서 최종 Y인 계정은 자동으로 카드가 생깁니다. 인스코프 외 계정을 따로 돌리려면 여기서 추가합니다.</p>
     <div class="row2"><input type="text" id="addName" placeholder="계정명"><button class="ghost mini" id="addAcct">카드 추가</button></div>
   </div></section>
@@ -262,12 +296,17 @@ table.grid input[type=checkbox]{width:auto}
 <div class="stage" data-stage="3">
 <div class="cols">
 <div>
-  <section class="panel"><h2>증빙 기본 세트</h2><div class="body">
+  <section class="panel"><h2>계정 시트 표시 열 (원천별) <button class="help" data-help="m3">?</button></h2><div class="body">
+    <p class="hint" style="margin-top:0">샘플요청 시트에 보일 열을 모집단 원천별로 고릅니다. 총계정원장 계정은 표준 열, 매출장 등 보조 원장 계정은 그 원장의 원본 열이 기본입니다. SAMPLE·NO.·증빙 열은 항상 들어갑니다.</p>
+    <div id="reqColsBox"></div>
+  </div></section>
+  <section class="panel"><h2>증빙 기본 세트 <button class="help" data-help="m3">?</button></h2><div class="body">
     <p class="hint" style="margin-top:0">쉼표로 구분. 계정 카드의 유형에 따라 초기값으로 들어가며 계정별로 고칠 수 있습니다.</p>
     <label class="f"><span>매입·비용</span><input type="text" id="ev매입" value="주문서, 거래명세서, 세금계산서, ERP 입고처리 화면"></label>
     <label class="f"><span>국내매출</span><input type="text" id="ev국내매출" value="발주서, 거래명세서, 세금계산서, ERP 출고처리 화면"></label>
     <label class="f"><span>해외매출</span><input type="text" id="ev해외매출" value="발주서, 수출신고필증, Commercial invoice, Packing list, Bill of lading, 구매확인서(로컬), ERP 출고처리 화면"></label>
     <label class="f"><span>기타</span><input type="text" id="ev기타" value="증빙서류, 계약서, 세금계산서"></label>
+    <label class="f"><span>계정 시트 행 구성</span><select id="reqMode"><option value="sel" selected>선정된 샘플만 (NO.는 조서 모집단 번호)</option><option value="hide">모집단 전체 + 비선정 행 숨김</option><option value="all">모집단 전체 (SAMPLE V 표시만)</option></select></label>
     <label class="f"><span>기간 구분 시트명</span><input type="text" id="divName" value="1~3분기 ▶"></label>
     <label class="f"><span>파일명(차수)</span><input type="text" id="reqTag" value="1차"></label>
   </div></section>
@@ -280,7 +319,7 @@ table.grid input[type=checkbox]{width:auto}
   <section class="panel">
     <h2>샘플 목록 미리보기</h2>
     <div class="tabs" id="reqTabs"></div>
-    <div class="body scroll" style="padding:0"><table class="grid" id="reqPrev"></table></div>
+    <div class="body scroll" style="padding:0;overflow:auto"><table class="grid" id="reqPrev" style="white-space:nowrap"></table></div>
   </section>
 </div>
 </div>
@@ -299,6 +338,7 @@ table.grid input[type=checkbox]{width:auto}
 
 <script>
 /* ============================ 공통 ============================ */
+const APP_VERSION='v4.0';
 const $=id=>document.getElementById(id);
 const num=n=>(n==null||isNaN(n))?'–':Math.round(n).toLocaleString('ko-KR');
 const pct=n=>(n==null||isNaN(n))?'–':(n*100).toFixed(2)+'%';
@@ -313,6 +353,15 @@ const BAND={AR:{'낮음':{Y:[75,100],N:[35,50]},'중간':{Y:[60,75],N:[25,35]},'
             LE:{'낮음':{Y:[45,60],N:[12,15]},'중간':{Y:[25,45],N:[10,12]},'높음':{Y:[15,25],N:[5,10]}}};
 const ROMAN=/^\s*[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+[\s.．]/;
 const setStatus=t=>$('status').textContent=t;
+function keepScroll(root,fn){   // 재렌더 시 창·내부(.codes 등) 스크롤 위치 보존
+  const y=window.scrollY,x=window.scrollX;const inner=[...(root||document).querySelectorAll('.codes,.scroll')].map(e=>e.scrollTop);
+  const act=document.activeElement;const actKey=act&&act.dataset?JSON.stringify(act.dataset):null;
+  fn();
+  [...(root||document).querySelectorAll('.codes,.scroll')].forEach((e,i)=>{if(inner[i]!=null)e.scrollTop=inner[i]});
+  window.scrollTo(x,y);
+  if(actKey){const el=[...(root||document).querySelectorAll('[data-rc],[data-code],[data-cat],[data-f],[data-sf],[data-sm]')].find(e=>JSON.stringify(e.dataset)===actKey);if(el&&el.focus)el.focus({preventScroll:true})}
+  window.scrollTo(x,y);
+}
 const fmtMoney=v=>{const n=toNum(v);return v===''||v==null?'':(n<0?'-':'')+Math.abs(Math.round(n)).toLocaleString('ko-KR')};
 document.addEventListener('input',e=>{const el=e.target;if(!(el instanceof HTMLInputElement)||!el.classList.contains('money'))return;
   const raw=el.value.replace(/[^\d\-]/g,'');if(raw===''||raw==='-'){return}const f=fmtMoney(raw);if(el.value!==f){el.value=f;try{el.setSelectionRange(f.length,f.length)}catch(_){}}});
@@ -320,7 +369,7 @@ document.addEventListener('input',e=>{const el=e.target;if(!(el instanceof HTMLI
 const S={
   stmts:[{title:'(1) 제조원가명세서',rows:[]},{title:'(2) 손익계산서',rows:[]}],
   ledger:{wb:null,raw:[],hdr:[],map:{},rows:[],codes:[]},
-  subs:[],
+  subs:[],reqCols:{},
   accts:[],            // 계정 카드
   stmtWb:null
 };
@@ -484,7 +533,7 @@ function recomputeScope(){
   const total=S.stmts.reduce((s,t)=>s+t.rows.length,0);
   $('scopeSum').textContent=total?`${total}행 · PM ${num(m.PM)}`:'';
   $('st1').textContent=total?`대상 ${cnt}계정 / ${total}행`:'계정-시산 미입력';
-  syncAcctsFromScope();
+  syncAcctsFromScope();if(typeof renderGuide==='function')renderGuide();
 }
 
 /* ============================ STAGE 2 : 원장 ============================ */
@@ -523,7 +572,7 @@ function renderLMap(){
     LFIELDS.forEach(([k,,kws])=>{$('lm_'+k).value=find(kws)});
     const exact=S.ledger.hdr.find(c=>norm(c.label)==='코드');if(exact)$('lm_vcode').value=exact.i;
   }
-  LFIELDS.forEach(([k])=>$('lm_'+k).onchange=()=>{if(!S.ledger.raw.length){setStatus('매핑을 바꾸려면 원장 파일을 다시 올려주세요.');renderLMap();return}parseLedger()});
+  LFIELDS.forEach(([k])=>$('lm_'+k).onchange=()=>{if(!S.ledger.raw.length){setStatus(S.ledger.big?'대용량 원장은 메모리 절약을 위해 파싱 후 원본을 해제합니다 — 매핑을 바꾸려면 다시 올려주세요.':'매핑을 바꾸려면 원장 파일을 다시 올려주세요.');renderLMap();return}parseLedger()});
 }
 function parseLedger(){
   const h=Math.max(1,+$('lHdr').value);
@@ -543,6 +592,7 @@ function parseLedger(){
   }
   rows.forEach((r,i)=>r.pos=i);S.ledger.ext=null;
   S.ledger.rows=rows;S.ledger.stat={read:S.ledger.raw.length-h,rows:rows.length,zero:zeroN,nocode:nocodeN,blank:blankN};
+  if(rows.length>BIG_ROWS){S.ledger.ext=encodeExtOf(S.ledger,true);S.ledger.raw=[];S.ledger.big=true}
   const m=new Map();rows.forEach(r=>{const o=m.get(r.code)||{code:r.code,name:r.name,n:0,dr:0,cr:0};o.n++;o.dr+=r.dr;o.cr+=r.cr;m.set(r.code,o)});
   S.ledger.codes=[...m.values()].sort((a,b)=>String(a.code).localeCompare(String(b.code),undefined,{numeric:true}));
   $('lStat').textContent=`원장 데이터 ${S.ledger.stat.read.toLocaleString()}행 읽음 → 인식 ${rows.length.toLocaleString()}행 (금액 0 행 ${zeroN.toLocaleString()} 포함)`+(nocodeN?` · 계정코드 없는 행 ${nocodeN.toLocaleString()} 제외`:'')+(blankN?` · 빈 행 ${blankN.toLocaleString()} 제외`:'')+` · 계정코드 ${S.ledger.codes.length}개`;
@@ -562,7 +612,7 @@ function suggestCodes(name){
 
 /* ============================ STAGE 2 : 계정 카드 ============================ */
 function defaults(){return {risk:$('dRisk').value,rely:$('dRely').value,covMult:parseFloat($('dCov').value),other:$('dOther').value,otherText:$('dOtherText').value}}
-function guessType(name){const n=norm(name);if(/해외|수출/.test(n)&&/매출|수출|판매/.test(n))return '해외매출';if(/매출|수익|판매|수입$|수입액|배당금/.test(n)&&!/매출원가|매입/.test(n))return '국내매출';if(/매입|가공|원가|비$|료$|수수료/.test(n))return '매입';return '기타'}
+function guessType(name){const n=norm(name);if(/할인|에누리|환입|대손|반품/.test(n))return '기타';if(/해외|수출/.test(n)&&/매출|수출|판매/.test(n))return '해외매출';if(/매출|수익|판매|수입$|수입액|배당금/.test(n)&&!/매출원가|매입/.test(n))return '국내매출';if(/매입|가공|원가|비$|료$|수수료/.test(n))return '매입';return '기타'}
 function newAcct(name,fsAmt,fromScope){
   const d=defaults(),type=guessType(name);
   return Object.assign({id:Math.random().toString(36).slice(2),name:name.trim(),fromScope:!!fromScope,fsAmt:fsAmt??0,codes:S.ledger.codes.length?suggestCodes(name):[],
@@ -583,7 +633,7 @@ $('addAcct').onclick=()=>{const n=$('addName').value.replace(/[\s\u3000]+/g,'');
 $('applyDefaults').onclick=()=>{const d=defaults();S.accts.forEach(a=>{Object.assign(a,d);a._autoWp=true;a.seed=null});syncAcctsFromScope();renderAccts()};
 
 /* ---------- 보조 원장 (매출장 등) ---------- */
-const SUBFIELDS=[['key','식별/전표',['전표번호','전표','식별','slip','key']],['vendor','거래처명',['거래처명','거래처','cust_nm','고객']],['vcode','거래처코드',['거래처코드','cst_code','cust_code','고객코드']],
+const SUBFIELDS=[['key','전표(단일 열)',['전표번호','전표','식별','slip','key']],['vendor','거래처명',['거래처명','거래처','cust_nm','고객']],['vcode','거래처코드',['거래처코드','cst_code','cust_code','고객코드']],
   ['date','날짜',['전표일자','일자','날짜','date','jnp_date']],['amt','금액',['공급가액','금액','매출액','amt','jnp_amt','합계']],['item','품목코드',['품목코드','제품코드','상품코드','item_cd','jpm_cd1','cd1']],
   ['itemName','품목명',['품목명','제품명','상품명','item_nm','jpm_name','name']],['desc','적요/비고',['적요','비고','remark','메모']],['biz','사업자번호',['사업자','nabno']]];
 const SUBKEYS=['idx','key','date','desc','vcode','vendor','biz','amt0','item','itemName'];
@@ -593,7 +643,8 @@ $('fileS').onchange=e=>{const f=e.target.files[0];if(f)subLoadFile(f);e.target.v
 const dzS=$('dropS');['dragenter','dragover'].forEach(t=>dzS.addEventListener(t,e=>{e.preventDefault();dzS.classList.add('on')}));['dragleave','drop'].forEach(t=>dzS.addEventListener(t,e=>{e.preventDefault();dzS.classList.remove('on')}));
 dzS.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)subLoadFile(f)});
 function subLoadFile(f){setStatus('보조 원장 읽는 중…');readWb(f,wb=>{
-  const sub={id:'s'+Math.random().toString(36).slice(2,8),name:f.name.replace(/\.[^.]+$/,''),wb,sheet:wb.SheetNames[0],hdrRow:1,hdr:[],raw:[],rows:[],map:{},keyCols:[],catCol:-1,mapText:'',mapTable:{},pivotCols:[-1,-1],cats:[],unmapped:[],stat:null,ext:null};
+  const nm=f.name.replace(/\.[^.]+$/,'');
+  const sub={id:'s'+Math.random().toString(36).slice(2,8),name:nm,sign:/매입|구매|지출|비용/.test(norm(nm))?'exp':'rev',wb,sheet:wb.SheetNames[0],hdrRow:1,hdr:[],raw:[],rows:[],map:{},keyCols:[],catCol:-1,mapText:'',mapTable:{},pivotCols:[-1,-1],cats:[],unmapped:[],stat:null,ext:null};
   S.subs.push(sub);subLoadSheet(sub);})}
 function subLoadSheet(sub){
   const ws=sub.wb.Sheets[sub.sheet];sub.raw=sheetRows(ws);
@@ -605,23 +656,30 @@ function subSetHdr(sub){const h=sub.hdrRow-1;sub.hdr=(sub.raw[h]||[]).map((v,i)=
 function subAutoMap(sub){
   const used=new Set();const find=kws=>{for(const kw of kws){const f=sub.hdr.find(c=>!used.has(c.i)&&norm(c.label).toLowerCase().includes(norm(kw).toLowerCase()));if(f){used.add(f.i);return f.i}}return -1};
   sub.map={};SUBFIELDS.forEach(([k,,kws])=>sub.map[k]=find(kws));
+  // 전표 식별 조합 기본값: 단일 전표열이 없으면 날짜 + 순번 열
+  if(!sub.idCols||!sub.idCols.length){const seq=sub.hdr.find(c=>/seq|순번|일련|slipno|전표순/.test(norm(c.label).toLowerCase()));sub.idCols=(sub.map.key<0&&sub.map.date>=0&&seq)?[sub.map.date,seq.i]:[];sub.idSep='-'}
   const fh=re=>{const f=sub.hdr.find(c=>re.test(norm(c.label).toLowerCase()));return f?f.i:-1};
   sub.pivotCols=[fh(/gubun_nm|거래구분|구분명|거래유형/),fh(/dtgbn_nm|할인구분|할인/)];
-  if(sub.catCol<0){sub.catCol=fh(/^매출구분$|^계정구분$|^계정$|^매출계정$/)}
+  if(sub.catCol<0){sub.catCol=fh(/^매출구분$|^매입구분$|^계정구분$|^계정$|^매출계정$|^계정과목$|^구분$|^tod/)}
   if(!sub.keyCols.length&&sub.map.item>=0)sub.keyCols=[sub.map.item];
 }
 function subParse(sub){
   const h=sub.hdrRow,M=sub.map,g=(r,k)=>M[k]>=0?r[M[k]]:null;const rows=[];let zero=0;
   for(let i=h;i<sub.raw.length;i++){const r=sub.raw[i]||[];if(r.every(v=>v==null||v===''))continue;
     const amt=toNum(g(r,'amt'));if(!amt)zero++;
-    let key=g(r,'key');if(key instanceof Date)key=fmtDate(key);key=key==null||key===''?`${sub.name}_${rows.length+1}`:String(key);
+    let key;
+    if(sub.idCols&&sub.idCols.length){key=sub.idCols.map(ci=>{let v=r[ci];if(v instanceof Date)v=fmtDate(v);return v==null?'':String(v)}).join(sub.idSep||'-')}
+    else{key=g(r,'key');if(key instanceof Date)key=fmtDate(key);key=key==null||key===''?'':String(key)}
+    if(!key)key=`${sub.name}_${rows.length+1}`;
     let date=g(r,'date');if(date instanceof Date)date=fmtDate(date);else if(/^\d{8}$/.test(String(date??'')))date=String(date).replace(/(\d{4})(\d{2})(\d{2})/,'$1/$2/$3');date=date==null?'':String(date);
     const item=String(g(r,'item')??''),itemName=String(g(r,'itemName')??''),remark=String(g(r,'desc')??'');
     rows.push({idx:i,pos:rows.length,src:sub.id,key,date,desc:[item&&itemName?item+' / '+itemName:(item||itemName),remark].filter(Boolean).join(' · '),vcode:String(g(r,'vcode')??''),vendor:String(g(r,'vendor')??''),biz:String(g(r,'biz')??''),amt0:amt,item,itemName,bal:0,proj:'',code:'',name:''});
   }
-  // 식별 열이 고유하지 않으면(예: 일련번호) 자동 식별자로 대체
-  if(M.key>=0){const u=new Set(rows.map(r=>r.key));if(u.size<rows.length*0.9){rows.forEach((r,i)=>r.key=`${sub.name}_${i+1}`);sub.keyAuto=true}else sub.keyAuto=false}
-  sub.rows=rows;sub.stat={read:sub.raw.length-h,rows:rows.length,zero};sub.ext=null;subClassify(sub);
+  // 식별 고유성: 중복이면 #2, #3… 을 붙여 구분 (한 전표에 여러 행)
+  {const seen=new Map();let dup=0;rows.forEach(r=>{const n=(seen.get(r.key)||0)+1;seen.set(r.key,n);if(n>1){r.key=`${r.key}#${n}`;dup++}});sub.keyDup=dup;sub.keyUniq=seen.size}
+  sub.rows=rows;sub.stat={read:sub.raw.length-h,rows:rows.length,zero};sub.ext=null;
+  if(rows.length>BIG_ROWS){sub.ext=encodeExtOf(sub,false);sub.raw=[];sub.big=true}
+  subClassify(sub);
 }
 function subRawVal(sub,r,ci){if(sub.raw.length){const raw=sub.raw[r.idx];return raw?raw[ci]:undefined}if(sub.ext&&sub.ext[ci]){const e=sub.ext[ci];const k=e.idx[r.pos];return k==null||k<0?undefined:e.dict[k]}return undefined}
 function parseMapText(t){const m={};(t||'').split(/\r?\n/).forEach(l=>{l=l.trim();if(!l)return;const parts=l.split(/\t|,/).map(x=>x.trim()).filter(Boolean);let k,c;if(parts.length>=2){k=parts[0];c=parts.slice(1).join(' ')}else{const mm=l.match(/^(\S+)\s+(.+)$/);if(!mm)return;k=mm[1];c=mm[2]}m[norm(k)]=c});return m}
@@ -638,7 +696,8 @@ function subClassify(sub){
   sub.cats=Object.values(cats).sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt));sub.unmapped=Object.values(un).sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt));
   renderSubs();renderAccts();
 }
-function renderSubs(){
+function renderSubs(){keepScroll($('subList'),renderSubs0)}
+function renderSubs0(){
   const host=$('subList');
   host.innerHTML=S.subs.map(sub=>{
     const opts=sel=>['<option value="-1">(없음)</option>'].concat(sub.hdr.map(c=>`<option value="${c.i}" ${sel===c.i?'selected':''}>${col(c.i)} · ${esc(c.label)}</option>`)).join('');
@@ -647,8 +706,12 @@ function renderSubs(){
       <div class="row3"><label class="f"><span>시트</span><select data-sf="sheet" ${sub.wb?'':'disabled'}>${(sub.wb?sub.wb.SheetNames:[sub.sheet]).map(n=>`<option ${n===sub.sheet?'selected':''}>${esc(n)}</option>`).join('')}</select></label>
         <label class="f"><span>머리글 행</span><input type="number" data-sf="hdrRow" value="${sub.hdrRow}" min="1" ${sub.wb?'':'disabled'}></label>
         <label class="f"><span>이름</span><input type="text" data-sf="name" value="${esc(sub.name)}"></label></div>
-      <div style="font-size:12px;color:var(--ink-2);margin:4px 0">열 매핑</div>
-      <div class="row3">${SUBFIELDS.map(([k,l])=>`<div class="map" style="grid-template-columns:80px 1fr"><span>${l}</span><select data-sm="${k}" ${sub.raw.length?'':'disabled'}>${opts(sub.map[k])}</select></div>`).join('')}</div>
+      <label class="f"><span>금액 부호 기준 — 카드의 계정 방향과 다르면 자동으로 부호를 뒤집습니다 (예: 매출장의 매출할인 −금액 → 차변 계정에서 +)</span><select data-sf="sign"><option value="rev" ${sub.sign!=='exp'?'selected':''}>수익 기준: 매출 +, 할인·반품·에누리 − (매출장)</option><option value="exp" ${sub.sign==='exp'?'selected':''}>비용 기준: 매입 +, 반품·할인 − (매입장)</option></select></label>
+      <div style="font-size:12px;color:var(--ink-2);margin:4px 0">열 매핑 — 매출장의 어느 열이 거래처·날짜·금액·품목인지. 자동 매핑되며 틀릴 때만 고치세요.${sub.raw.length?'':` <span style="color:var(--amber)">(${sub.big?'대용량이라 파싱 후 원본 해제':'저장 파일에서 복원된 상태'} — 매핑을 바꾸려면 보조 원장을 다시 올리세요)</span>`}</div>
+      ${sub.hdr&&sub.hdr.length?`<div class="row3">${SUBFIELDS.map(([k,l])=>{const ci=sub.map[k]??-1;const h=sub.hdr.find(c=>c.i===ci);return `<div class="map" style="grid-template-columns:80px 1fr"><span>${l}</span>${sub.raw.length?`<select data-sm="${k}">${opts(ci)}</select>`:`<input type="text" value="${h?esc(col(h.i)+' · '+h.label):'(없음)'}" disabled style="color:var(--ink-2)">`}</div>`}).join('')}</div>`:`<div class="warn">열 정보가 없습니다 — 보조 원장을 다시 올려주세요.</div>`}
+      <div style="font-size:12px;color:var(--ink-2);margin:8px 0 4px"><b>전표 식별 구성</b> — 조서의 「재무회계 KEY/전표코드」에 들어갈 값. 단일 전표 열이 없으면 열 2~3개를 구분자로 이어 만듭니다 (예: 전표일자-순번)</div>
+      <div class="row3">${[0,1,2].map(i=>`<label class="f"><span>열 ${i+1}${i?' (선택)':''}</span><select data-sf="id${i}" ${sub.raw.length?'':'disabled'}>${opts((sub.idCols||[])[i]??-1)}</select></label>`).join('')}</div>
+      <div class="row2"><label class="f"><span>구분자</span><input type="text" data-sf="idSep" value="${esc(sub.idSep||'-')}" style="width:80px"></label><div class="hint" style="align-self:end;padding-bottom:12px">${sub.keyUniq!=null?`고유 식별 ${sub.keyUniq.toLocaleString()}개${sub.keyDup?` · 중복 ${sub.keyDup.toLocaleString()}행은 #2,#3… 부여`:''}`:''}</div></div>
       <div style="font-size:12px;color:var(--ink-2);margin:8px 0 4px"><b>구분값 결정</b> — ① 구분 열이 있으면 그 값을 쓰고, 없으면 ② 키 열 값을 매핑표에서 찾습니다</div>
       <div class="row3">
         <label class="f"><span>① 구분 열 (예: 매출구분·계정)</span><select data-sf="catCol">${opts(sub.catCol)}</select></label>
@@ -670,10 +733,12 @@ function renderSubs(){
       if(f==='sheet'){sub.sheet=el.value;subLoadSheet(sub);return}
       if(f==='hdrRow'){sub.hdrRow=Math.max(1,+el.value||1);subSetHdr(sub);subAutoMap(sub);subParse(sub);return}
       if(f==='name'){sub.name=el.value;renderSubs();renderAccts();return}
+      if(f==='sign'){sub.sign=el.value;S.accts.forEach(a=>{if(a.src==='sub:'+sub.id)a.seed=null});renderAccts();return}
       if(f==='catCol'){sub.catCol=+el.value;subClassify(sub);return}
       if(f==='key0'||f==='key1'){const k=[+box.querySelector('[data-sf=key0]').value,+box.querySelector('[data-sf=key1]').value].filter(v=>v>=0);sub.keyCols=k;subClassify(sub);return}
       if(f==='mapText'){sub.mapText=el.value;subClassify(sub);return}
       if(f==='pv0'||f==='pv1'){sub.pivotCols=[+box.querySelector('[data-sf=pv0]').value,+box.querySelector('[data-sf=pv1]').value];return}
+      if(/^id[0-2]$/.test(f)||f==='idSep'){sub.idCols=[0,1,2].map(i=>+box.querySelector(`[data-sf=id${i}]`).value).filter(v=>v>=0);sub.idSep=box.querySelector('[data-sf=idSep]').value||'-';if(!sub.raw.length){setStatus('식별 구성을 바꾸려면 보조 원장을 다시 올려주세요.');renderSubs();return}subParse(sub);return}
     });
     box.querySelectorAll('[data-sm]').forEach(el=>el.onchange=()=>{sub.map[el.dataset.sm]=+el.value;subParse(sub)});
     box.querySelectorAll('[data-sa]').forEach(b=>b.onclick=async()=>{const act=b.dataset.sa;
@@ -682,11 +747,13 @@ function renderSubs(){
       if(act==='unDl'){const wb=new ExcelJS.Workbook();const ws=wb.addWorksheet('미매핑 키');['키','품목명','건수','금액','구분값(입력)'].forEach((h,i)=>put(ws,col(i)+'1',h,{hdr:1}));sub.unmapped.forEach((u,i)=>{put(ws,'A'+(i+2),u.key);put(ws,'B'+(i+2),u.name);put(ws,'C'+(i+2),u.n);put(ws,'D'+(i+2),u.amt,{fmt:N});put(ws,'E'+(i+2),'',{fill:C_IN})});widths(ws,{A:16,B:40,C:8,D:18,E:18});download(await wb.xlsx.writeBuffer(),`미매핑키_${sub.name}.xlsx`);setStatus('E열에 구분값을 채워 「매핑표 파일에서 불러오기」로 다시 올리면 됩니다 (A·E열만 읽음)')}
     });
   });
+  if(typeof applyTips==='function')applyTips($('subList'));
 }
 
 function acctRows(a){
   if(a.src&&a.src.startsWith('sub:')){const sub=subOf(a.src.slice(4));if(!sub)return [];
-    return sub.rows.filter(r=>a.cats.includes(r.code)).map(r=>({...r,dr:a.side==='dr'?r.amt0:0,cr:a.side==='cr'?r.amt0:0,amt:r.amt0,pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}))}
+    const base=sub.sign==='exp'?'dr':'cr';const v=r=>a.side===base?r.amt0:-r.amt0;
+    return sub.rows.filter(r=>a.cats.includes(r.code)).map(r=>({...r,dr:a.side==='dr'?v(r):0,cr:a.side==='cr'?v(r):0,amt:v(r),pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}))}
   const sel=S.ledger.rows.filter(r=>a.codes.includes(r.code));
   return sel.map(r=>({...r,amt:a.side==='dr'?r.dr-r.cr:r.cr-r.dr,pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}));
 }
@@ -707,7 +774,8 @@ function exFieldVal(r,field){
     if(r.src){const sub=subOf(r.src);v=sub?subRawVal(sub,r,ci):undefined}
     else if(S.ledger.raw.length){const raw=S.ledger.raw[r.idx];v=raw?raw[ci]:undefined}
     else if(S.ledger.ext&&S.ledger.ext[ci]){const e=S.ledger.ext[ci];const k=e.idx[r.pos];v=k==null||k<0?undefined:e.dict[k]}
-    else if(r.ext)v=r.ext[ci];
+    else{const mk=Object.keys(S.ledger.map||{}).find(k=>S.ledger.map[k]===ci);   // 매핑된 열은 표준 필드 값으로
+      if(mk)v=r[mk];else if(r.ext)v=r.ext[ci]}
     return v==null?'':String(v)}
   return String(r[field]??'');
 }
@@ -781,8 +849,8 @@ function ledgerSideOf(codes){   // 매핑 코드의 원장 차·대변 합계로
   if(!dr&&!cr)return null;return {dr,cr,side:cr>dr?'cr':'dr'};
 }
 function autoSide(a){
-  if(a._sideManual||!a.codes.length||(a.src&&a.src.startsWith('sub:')))return;
-  const g=ledgerSideOf(a.codes);if(!g)return;
+  if(a._sideManual||!a.codes.length)return;
+  const g=ledgerSideOf(a.codes);if(!g)return;   // 보조원장 원천이어도 연결된 GL 코드의 방향을 따름
   if(g.side!==a.side){a.side=g.side;a.acctType=g.side==='cr'?'AR':'LE';if(!a.evid)a.evType=g.side==='cr'?(/해외|수출/.test(norm(a.name))?'해외매출':'국내매출'):(a.evType==='기타'?'매입':a.evType);a.seed=null}
 }
 function codeSideSum(a,code){   // 코드별 당기 발생액(마감·이월 제외), 계정 방향
@@ -799,6 +867,12 @@ function findDiffCombos(a,target){
     for(let j=i;j<cand.length;j++){const nv=sum+Math.round(cand[j].v);if(Math.abs(nv)>Math.abs(T)+1&&Math.sign(nv)===Math.sign(T))continue;pick.push(cand[j]);dfs(j+1,nv,pick);pick.pop();if(out.length>=8)return}};
   dfs(0,0,[]);return out;
 }
+function nextStep(a,r,isSub,hasL){
+  if(isSub){if(!a.cats.length)return '→ 구분값을 선택하세요';if(!a.codes.length)return '→ 재무제표 금액 연결(총계정원장 코드) 또는 금액 직접 입력'}
+  else{if(!hasL)return '→ 총계정원장을 올리세요';if(!a.codes.length)return '→ 계정코드를 검색해 선택하세요'}
+  if(!r)return '';if(r.resid!==0)return '→ 잔여차이 해소 (코드 조합 찾기 · 제외규칙 · 차이항목)';
+  if(!r.inc.length)return '→ 모집단 0건: 제외규칙 확인';return '✓ 조서 생성 가능 — 위험·기준금액 확인 후 다운로드';
+}
 function codeListHtml(a){
   if(!S.ledger.codes.length)return '<span class="hint">원장을 먼저 올려주세요.</span>';
   const q=norm(a._q||'').toLowerCase();
@@ -808,7 +882,8 @@ function codeListHtml(a){
   return list.map(c=>`<label><input type="checkbox" data-code="${esc(c.code)}" ${a.codes.includes(c.code)?'checked':''}>${esc(c.code)} ${esc(c.name)} <span class="hint" style="margin:0">${c.n.toLocaleString()}건</span></label>`).join('')
     +(hit.length>150?`<span class="hint">… ${hit.length-150}개 더 있음 — 검색어를 좁혀주세요</span>`:'')+(hit.length?'':'<span class="hint">일치하는 코드가 없습니다</span>');
 }
-function renderAccts(){
+function renderAccts(){keepScroll($('acctList'),renderAccts0)}
+function renderAccts0(){
   const host=$('acctList');
   if(!S.accts.length){host.innerHTML='<section class="panel"><div class="body hint">①에서 대상 계정이 정해지면 카드가 생깁니다.</div></section>';$('dl2').disabled=true;return}
   const hasL=S.ledger.rows.length>0;
@@ -821,7 +896,7 @@ function renderAccts(){
     const band=BAND[a.acctType][a.risk][a.rely],kp=keyPctOf(a);
     const res=r?`${r.keys.length} + ${r.rep} = ${r.total}건${r.resid!==0?' · 차이 미해소':''}`:(isSub?'구분값 미선택':(hasL?'계정코드 미매핑':'원장 없음'));
     return `<div class="acct" ${a.open?'data-open':''} data-id="${a.id}">
-      <h3><span>${esc(a.name)}</span><span class="chip">${esc(a.wp)}</span><span class="chip ${a.fromScope?'y':'o'}">${a.fromScope?'인스코프':'수동'}</span><span class="res ${(!r||r.resid!==0)?'bad':''}">${res}</span></h3>
+      <h3><span>${esc(a.name)}</span><span class="chip">${esc(a.wp)}</span><span class="chip ${a.fromScope?'y':'o'}">${a.fromScope?'인스코프':'수동'}</span><span class="res ${(!r||r.resid!==0)?'bad':''}">${res}</span><span class="next">${nextStep(a,r,isSub,hasL)}</span></h3>
       <div class="body">
         <div class="row3">
           <label class="f"><span>조서번호</span><input type="text" data-f="wp" value="${esc(a.wp)}"></label>
@@ -844,6 +919,7 @@ function renderAccts(){
           <label class="f"><span>coverage 계수</span><select data-f="covMult"><option value="0.6" ${a.covMult==0.6?'selected':''}>0.6</option><option value="0.7" ${a.covMult==0.7?'selected':''}>0.7</option></select></label>
           <label class="f"><span>기타실증절차 확신</span><select data-f="other">${['거의 없음','일부','상당한'].map(k=>`<option ${a.other===k?'selected':''}>${k}</option>`).join('')}</select></label>
         </div>
+        <details class="adv"><summary>고급 설정 — 대사 기준 · 결산/이월 키워드 · 상쇄 전표 · 기타실증절차 문구 (보통 기본값 그대로)</summary>
         <label class="f"><span>기타실증절차 근거 문구</span><input type="text" data-f="otherText" value="${esc(a.otherText)}"></label>
         <div class="row3">
           <label class="f"><span>완전성 대사 기준</span><select data-f="recon"><option value="gross" ${a.recon!=='net'?'selected':''}>${a.side==='dr'?'차변':'대변'} 발생액 (마감·이월 제외) — 기본</option><option value="net" ${a.recon==='net'?'selected':''}>순액 (${a.side==='dr'?'차변−대변':'대변−차변'}, 마감·이월 제외)</option></select></label>
@@ -851,7 +927,8 @@ function renderAccts(){
           <label class="f"><span>이월 전표 키워드 (기초잔액 → 제외)</span><input type="text" data-f="carryKw" value="${esc(a.carryKw||'')}" placeholder="전기이월,기초이월"></label>
         </div>
         <label class="f"><span>상쇄 전표 쌍 (양수키워드 = 음수키워드) — 같은 |금액|의 쌍을 모집단에서 제외</span><input type="text" data-f="offsetKw" value="${esc(a.offsetKw||'')}" placeholder="수입계산서 = 원재료대체"></label>
-        ${(()=>{const g=!isSub&&a.codes.length?ledgerSideOf(a.codes):null;return g&&g.side!==a.side?`<div class="warn" style="margin:6px 0">원장은 ${g.side==='cr'?'대변':'차변'} 위주(차 ${num(g.dr)} / 대 ${num(g.cr)})인데 양수 방향이 ${a.side==='cr'?'대변':'차변'}으로 설정되어 있습니다. <button class="link" data-act="flipSide">${g.side==='cr'?'대변':'차변'}으로 바꾸기</button></div>`:''})()}
+        </details>
+        ${(()=>{const g=a.codes.length?ledgerSideOf(a.codes):null;return g&&g.side!==a.side?`<div class="warn" style="margin:6px 0">원장은 ${g.side==='cr'?'대변':'차변'} 위주(차 ${num(g.dr)} / 대 ${num(g.cr)})인데 양수 방향이 ${a.side==='cr'?'대변':'차변'}으로 설정되어 있습니다. <button class="link" data-act="flipSide">${g.side==='cr'?'대변':'차변'}으로 바꾸기</button></div>`:''})()}
         ${r&&r.byCode.length?`<div style="font-size:12px;color:var(--ink-2);margin-top:4px">매핑 코드별 당기 발생 (마감·이월 제외) — 재무제표 금액과 맞는 코드만 남기세요</div>
         <table class="grid" style="margin-bottom:8px"><tr><th>코드</th><th>계정명</th><th class="n">건수</th><th class="n">차변</th><th class="n">대변</th></tr>
         ${r.byCode.map(c=>`<tr><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td class="n">${c.n}</td><td class="n">${num(c.dr)}</td><td class="n">${num(c.cr)}</td></tr>`).join('')}</table>`:''}
@@ -898,7 +975,7 @@ function renderAccts(){
     card.querySelector('h3').onclick=()=>{a.open=!a.open;card.toggleAttribute('data-open')};
     card.querySelectorAll('[data-f]').forEach(el=>{
       const commit=()=>{const f=el.dataset.f;let v=el.value;if(f==='fsAmt'||f==='keyPct')v=toNum(v);if(f==='covMult')v=parseFloat(v);
-        if(f==='keyPct'&&(!v))v=null;a[f]=v;if(f==='wp')a._autoWp=false;if(f==='side')a._sideManual=true;if(f==='fsAmt')a._fsManual=true;if(f==='src'){a.cats=[];a.ex=[];if(v.startsWith('sub:')){const rev=guessType(a.name).includes('매출');a.side=rev?'cr':'dr';a.acctType=rev?'AR':'LE';a._sideManual=true}}if(['side','acctType','risk','rely','carryKw','closeKw','offsetKw','recon'].includes(f))a.seed=null;renderAccts()};
+        if(f==='keyPct'&&(!v))v=null;a[f]=v;if(f==='wp')a._autoWp=false;if(f==='side')a._sideManual=true;if(f==='fsAmt')a._fsManual=true;if(f==='src'){a.cats=[];a.ex=[];if(v.startsWith('sub:')){const rev=guessType(a.name).includes('매출');a.side=rev?'cr':'dr';a.acctType=rev?'AR':'LE';a._sideManual=false}}if(['side','acctType','risk','rely','carryKw','closeKw','offsetKw','recon'].includes(f))a.seed=null;renderAccts()};
       el.onchange=commit;
     });
     const bindCodes=()=>card.querySelectorAll('[data-code]').forEach(cb=>cb.onchange=()=>{const c=cb.dataset.code;if(cb.checked){if(!a.codes.includes(c))a.codes.push(c)}else a.codes=a.codes.filter(x=>x!==c);a.seed=null;autoSide(a);renderAccts()});
@@ -927,10 +1004,14 @@ function renderAccts(){
   $('dl2').disabled=!ready.length;$('dl3').disabled=!ready.length;
   $('st2').textContent=`원장 ${S.ledger.rows.length.toLocaleString()}행 · 표본 확정 ${ready.length}/${S.accts.length}`;
   $('st3').textContent=ready.length?`${ready.length}계정 · 샘플 ${ready.reduce((s,a)=>s+a._r.total,0)}건`:'–';
+  if(typeof applyTips==='function'){applyTips($('acctList'));applyTips($('subList'));renderGuide()}
 }
 
 /* ============================ 엑셀 공통 ============================ */
-const FONT=(o={})=>Object.assign({name:'Arial',size:9},o);
+const _FC=new Map();const FONT=(o={})=>{const k=JSON.stringify(o||{});let f=_FC.get(k);if(!f){f=Object.assign({name:'Arial',size:9},o||{});_FC.set(k,f)}return f};
+const _AC=new Map();const ALIGN=o=>{const k=JSON.stringify(o);let a=_AC.get(k);if(!a){a=o;_AC.set(k,a)}return a};
+const _FL=new Map();const FILL=argb=>{let f=_FL.get(argb);if(!f){f={type:'pattern',pattern:'solid',fgColor:{argb}};_FL.set(argb,f)}return f};
+const BIG_ROWS=30000;   // 이 행수를 넘는 원장은 경량 모드(원본 열 생략·raw 해제)
 const C_HDR='FF305496',C_SUB='FFDDEBF7',C_IN='FFFFF2CC',C_RES='FFE2EFDA',C_SEC='FFF2F2F2',C_NOTE='FF7F7F7F';
 const THIN={style:'thin',color:{argb:'FFA6A6A6'}};const BD={top:THIN,left:THIN,bottom:THIN,right:THIN};
 const B={bold:true},T11={size:11,bold:true},T14={size:14,bold:true,color:{argb:'FF1F3864'}},NOTE={italic:true,color:{argb:C_NOTE}};
@@ -938,12 +1019,12 @@ const N='#,##0',P='0.00%';
 function put(ws,addr,val,o={}){const c=ws.getCell(addr);
   if(typeof val==='string'&&val.startsWith('='))c.value={formula:val.slice(1)};else if(val!==undefined)c.value=val;
   let font=o.font,fill=o.fill,al=o.al,bd=o.bd;
-  if(o.hdr){font=Object.assign({bold:true,color:{argb:'FFFFFFFF'}},o.font||{});fill=C_HDR;al=al||{horizontal:'center',vertical:'middle',wrapText:true};bd=1}
+  if(o.hdr){font=Object.assign({bold:true,color:{argb:'FFFFFFFF'}},o.font||{});fill=C_HDR;al=al||ALIGN({horizontal:'center',vertical:'middle',wrapText:true});bd=1}
   if(o.sub){font=Object.assign({bold:true},o.font||{});fill=C_SUB;bd=1}
   if(o.res){font=Object.assign({bold:true},o.font||{});fill=C_RES;bd=1}
   if(o.sec){font=Object.assign({bold:true,size:10},o.font||{});fill=C_SEC}
   if(o.note)font=Object.assign({},NOTE,o.font||{});
-  c.font=FONT(font);if(o.fmt)c.numFmt=o.fmt;if(bd)c.border=BD;if(fill)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:fill}};if(al)c.alignment=al;return c}
+  c.font=FONT(font);if(o.fmt)c.numFmt=o.fmt;if(bd)c.border=BD;if(fill)c.fill=FILL(fill);if(al)c.alignment=ALIGN(al);return c}
 function widths(ws,map){Object.entries(map).forEach(([k,v])=>ws.getColumn(k).width=v)}
 function band(ws,row,c1,c2,fill){for(let c=c1;c<=c2;c++){const cell=ws.getCell(row,c);cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:fill||C_SEC}}}}
 function cfBool(ws,ref){ws.addConditionalFormatting({ref,rules:[
@@ -951,6 +1032,41 @@ function cfBool(ws,ref){ws.addConditionalFormatting({ref,rules:[
   {type:'containsText',operator:'containsText',text:'FALSE',style:{fill:{type:'pattern',pattern:'solid',bgColor:{argb:'FFFFC7CE'}},font:{color:{argb:'FF9C0006'},bold:true}}}]})}
 function cfText(ws,ref,text,argbFill,argbFont){ws.addConditionalFormatting({ref,rules:[{type:'containsText',operator:'containsText',text,style:{fill:{type:'pattern',pattern:'solid',bgColor:{argb:argbFill}},font:{color:{argb:argbFont},bold:true}}}]})}
 const q=s=>String(s).replace(/"/g,'""');
+
+/* ---------- 대용량 시트: ExcelJS 셀 객체 대신 sheetData XML을 직접 생성 ---------- */
+const xesc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,'');
+function regBig(wb,ws,firstRow,lastRow,gen){(wb._big=wb._big||[]).push({name:ws.name,firstRow,lastRow,gen})}
+async function injectBigSheets(buf,regs){
+  const T0=Date.now(),dbg=m=>console.log('[big]',m,Date.now()-T0,'ms');
+  const zip=await JSZip.loadAsync(buf instanceof Uint8Array?buf:new Uint8Array(buf));dbg('zip loaded');
+  const wbx=await zip.file('xl/workbook.xml').async('string'),rels=await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  const relMap={};[...rels.matchAll(/<Relationship\b[^>]*?Id="([^"]+)"[^>]*?Target="([^"]+)"/g)].forEach(m=>relMap[m[1]]=m[2]);
+  [...rels.matchAll(/<Relationship\b[^>]*?Target="([^"]+)"[^>]*?Id="([^"]+)"/g)].forEach(m=>{if(!relMap[m[2]])relMap[m[2]]=m[1]});
+  const sheetPath={};[...wbx.matchAll(/<sheet\b[^>]*?name="([^"]+)"[^>]*?r:id="([^"]+)"/g)].forEach(m=>{const t=relMap[m[2]];sheetPath[m[1].replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>')]=t.startsWith('/')?t.slice(1):('xl/'+t.replace(/^\/?xl\//,''))});
+  for(const reg of regs){
+    const path=sheetPath[reg.name];if(!path||!zip.file(path)){console.warn('big sheet not found',reg.name);continue}
+    let xml=await zip.file(path).async('string');
+    const sdStart=xml.indexOf('<sheetData>'),sdEnd=xml.indexOf('</sheetData>');if(sdStart<0){continue}
+    const body=xml.slice(sdStart+11,sdEnd);
+    const rowRe=/<row\b[^>]*?\br="(\d+)"[^>]*>[\s\S]*?<\/row>|<row\b[^>]*?\br="(\d+)"[^>]*\/>/g;
+    const before=[],after=[];let sample=null;
+    for(const m of body.matchAll(rowRe)){const rn=+(m[1]||m[2]);if(rn<reg.firstRow)before.push(m[0]);else if(rn>reg.lastRow)after.push(m[0]);else if(rn===reg.firstRow)sample=m[0]}
+    const sty={};if(sample)for(const c of sample.matchAll(/<c\b[^>]*?\br="([A-Z]+)\d+"[^>]*?\bs="(\d+)"/g))sty[c[1]]=c[2];
+    const out=[];let chunk=[];for(let rn=reg.firstRow;rn<=reg.lastRow;rn++){const cells=reg.gen(rn-reg.firstRow);let row='<row r="'+rn+'">';
+      for(const c of cells){const st=sty[c.c]!=null?' s="'+sty[c.c]+'"':'';const ref=c.c+rn;
+        if(c.f!=null)row+='<c r="'+ref+'"'+st+'><f>'+xesc(c.f)+'</f></c>';
+        else if(c.n!=null)row+='<c r="'+ref+'"'+st+'><v>'+(Number.isFinite(c.n)?c.n:0)+'</v></c>';
+        else if(c.t!=null&&c.t!=='')row+='<c r="'+ref+'"'+st+' t="inlineStr"><is><t xml:space="preserve">'+xesc(c.t)+'</t></is></c>';
+        else if(st)row+='<c r="'+ref+'"'+st+'/>'}
+      chunk.push(row+'</row>');if(chunk.length>=5000){out.push(chunk.join(''));chunk=[]}}
+    if(chunk.length)out.push(chunk.join(''));
+    let head=xml.slice(0,sdStart),tail=xml.slice(sdEnd+12);
+    const dim=head.match(/<dimension ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/);if(dim){const maxR=Math.max(+dim[4],reg.lastRow);head=head.replace(dim[0],`<dimension ref="${dim[1]}${dim[2]}:${dim[3]}${maxR}"/>`)}
+    const parts=[head,'<sheetData>',before.join(''),...out,after.join(''),'</sheetData>',tail];
+    zip.file(path,(typeof Blob!=='undefined')?new Blob(parts,{type:'application/xml'}):parts.join(''));dbg(reg.name+' rows '+(reg.lastRow-reg.firstRow+1));
+  }
+  const res=await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE',compressionOptions:{level:1}});dbg('zipped '+(res.byteLength/1048576).toFixed(1)+'MB');return res;
+}
 
 /* ============================ STAGE 1 : 엑셀 ============================ */
 async function buildScope(){
@@ -1021,13 +1137,17 @@ $('dl1').onclick=async()=>{setStatus('인스코프 조서 생성 중…');try{co
 /* ============================ STAGE 2 : UA1000 엑셀 ============================ */
 async function downloadUA1000(a){
   if(!a._r||!a._r.inc.length){setStatus(`${a.name}: 모집단이 0건이라 조서를 만들 수 없습니다 (매핑·제외규칙 확인).`);return}
-  const wb=await buildUA1000(a);
-  download(await wb.xlsx.writeBuffer(),`TOD_${a.name}_${$('company').value}_${$('period').value}.xlsx`);
+  let wb=await buildUA1000(a);
+  let buf=await wb.xlsx.writeBuffer();const regs=wb._big;wb=null;
+  if(regs&&regs.length){setStatus(`${a.name}: 대용량 시트 기록 중…`);buf=await injectBigSheets(buf,regs)}
+  download(buf,`TOD_${a.name}_${$('company').value}_${$('period').value}.xlsx`);buf=null;
   setStatus(`${a.name} — 표본 ${a._r.total}건 (Key ${a._r.keys.length} + Rep ${a._r.rep}) 내려받음`);
 }
 $('dl2').onclick=async()=>{
   const ready=S.accts.filter(a=>a._r);$('dl2').disabled=true;
-  for(const a of ready){setStatus(`${a.name} 조서 생성 중…`);try{await downloadUA1000(a)}catch(e){console.error(e);setStatus(a.name+' 실패: '+e.message)}await new Promise(r=>setTimeout(r,600))}
+  for(let i=0;i<ready.length;i++){const a=ready[i];setStatus(`(${i+1}/${ready.length}) ${a.name} 조서 생성 중… (모집단 ${a._r.inc.length.toLocaleString()}건)`);
+    try{await downloadUA1000(a)}catch(e){console.error(e);setStatus(a.name+' 실패: '+e.message+(/memory|alloc/i.test(e.message)?' — 메모리 부족. 다른 탭을 닫고 이 계정만 따로 다운로드하세요.':''))}
+    await new Promise(r=>setTimeout(r,2500))}
   $('dl2').disabled=false;setStatus(`② ${ready.length}개 조서 내려받음`);
 };
 async function buildUA1000(a){
@@ -1042,7 +1162,7 @@ async function buildUA1000(a){
   const SLOTS=Math.max(1,r.keys.length),KEND=51+SLOTS,KSUM=KEND+2,X=KSUM,rRisk=[X+8,X+9,X+10],rOth=[X+21,X+22,X+23],LAST3=22+N2,SUM3=LAST3+2,CMA=SUM3+2;
   const relyTxt=a.rely==='Y'?'의존하기로':'의존하지 않기로';const sideK=a.side==='dr'?'차변':'대변';
   const LN=2+r.allRows.length;   // 원장 시트 마지막 데이터행
-  const TG=`'${SL}'!O3:O${LN}`,JJ=`'${SL}'!J3:J${LN}`,KK=`'${SL}'!K3:K${LN}`,SS=a.side==='dr'?JJ:KK;
+  const TG=`'${SL}'!F3:F${LN}`,JJ=`'${SL}'!D3:D${LN}`,KK=`'${SL}'!E3:E${LN}`,SS=a.side==='dr'?JJ:KK;
   const gross=a.recon!=='net';const OO=a.side==='dr'?KK:JJ;const XC=`${TG},"<>이월",${TG},"<>마감",${TG},"<>제외"`;
   const title=(w,t)=>{put(w,'B2',company,{font:T14});put(w,'B3',t,{font:T11});put(w,'B4',period);};
   const sec=(w,addr,t)=>{put(w,addr,t,{sec:1});band(w,+addr.replace(/\D/g,''),2,10)};
@@ -1133,8 +1253,11 @@ async function buildUA1000(a){
   put(w2,'C'+R_PM,'수행중요성',{bd:1});put(w2,'D'+R_PM,`='${S1}'!E21`,{fmt:N,bd:1});put(w2,'C'+R_RATIO,'비율',{bd:1});put(w2,'D'+R_RATIO,`=D${R_THR}/D${R_PM}`,{fmt:'0.0%',bd:1});
   put(w2,'C'+R_CNT,'표본개수',{bd:1});put(w2,'D'+R_CNT,`=COUNTA($C$${D0}:$C$${LAST2})`,{fmt:N,bd:1});put(w2,'C'+R_THR,'Key Item 기준금액',{res:1});put(w2,'D'+R_THR,`='${S1}'!E22`,{fmt:N,res:1});
   ['Key Item No.','재무회계 KEY','계정코드','계정명','금액','적요','계','Key Item?'].forEach((h,i)=>put(w2,String.fromCharCode(67+i)+HDR,h,{hdr:1}));w2.getRow(HDR).height=26;
-  r.inc.forEach((x,i)=>{const rw=D0+i;put(w2,'C'+rw,`=IF(J${rw}>0,COUNTIF($J$${D0}:J${rw},">0"),"")`,{bd:1,al:{horizontal:'center'},font:B});put(w2,'D'+rw,x.key,{bd:1});put(w2,'E'+rw,x.code,{bd:1});put(w2,'F'+rw,x.name,{bd:1});
-    put(w2,'G'+rw,x.amt,{fmt:N,bd:1});put(w2,'H'+rw,x.pdesc,{bd:1});put(w2,'I'+rw,`=G${rw}`,{fmt:N,bd:1});put(w2,'J'+rw,`=+IF(I${rw}>=$D$${R_THR},I${rw},0)`,{fmt:N,bd:1})});
+  const BIG=N2>BIG_ROWS;
+  const row2=(x,i)=>{const rw=D0+i;put(w2,'C'+rw,`=IF(J${rw}>0,COUNTIF($J$${D0}:J${rw},">0"),"")`,{bd:1,al:{horizontal:'center'},font:B});put(w2,'D'+rw,x.key,{bd:1});put(w2,'E'+rw,x.code,{bd:1});put(w2,'F'+rw,x.name,{bd:1});
+    put(w2,'G'+rw,x.amt,{fmt:N,bd:1});put(w2,'H'+rw,x.pdesc,{bd:1});put(w2,'I'+rw,`=G${rw}`,{fmt:N,bd:1});put(w2,'J'+rw,`=+IF(I${rw}>=$D$${R_THR},I${rw},0)`,{fmt:N,bd:1})};
+  if(!BIG)r.inc.forEach(row2);
+  else{row2({...r.inc[0],key:'x',code:'x',name:'x',pdesc:'x'},0);regBig(wb,w2,D0,LAST2,i=>{const x=r.inc[i],rw=D0+i;return [{c:'C',f:`IF(J${rw}>0,COUNTIF($J$${D0}:J${rw},">0"),"")`},{c:'D',t:x.key},{c:'E',t:String(x.code??'')},{c:'F',t:x.name},{c:'G',n:x.amt},{c:'H',t:x.pdesc},{c:'I',f:`G${rw}`},{c:'J',f:`IF(I${rw}>=$D$${R_THR},I${rw},0)`}]})}
   put(w2,'C'+T2,`=+MAX(C${D0}:C${LAST2+1})`,{res:1,al:{horizontal:'center'}});['D','E','F','H'].forEach(cl=>put(w2,cl+T2,'',{res:1}));['G','I','J'].forEach(cl=>put(w2,cl+T2,`=SUM(${cl}${D0}:${cl}${LAST2+1})`,{res:1,fmt:N}));
   put(w2,'F'+(T2+2),'check: 모집단 = 조정표',{note:1});put(w2,'G'+(T2+2),`=G${T2}=M22`,{al:{horizontal:'center'}});put(w2,'I'+(T2+2),'잔여 모집단(MUS)',{note:1});put(w2,'J'+(T2+2),`=I${T2}-J${T2}`,{fmt:N});
   w2.views=[{state:'frozen',ySplit:HDR,showGridLines:false}];cfBool(w2,`C1:M${T2+3}`);w2.getColumn('L').width=44;
@@ -1188,9 +1311,12 @@ async function buildUA1000(a){
   put(w3,'C19','Representative sample 추출',{font:B});
   ['No.','재무회계 KEY','금액','누적금액','# of selections','표본간격','Selection remainder'].forEach((h,i)=>put(w3,String.fromCharCode(67+i)+'21',h,{hdr:1}));w3.getRow(21).height=26;
   put(w3,'I22','=-E16',{fmt:N,bd:1});const MI=`MATCH('${S2}'!$I$${HDR},'${S2}'!$D$${HDR}:$J$${HDR},0)`;
-  for(let i=0;i<N2;i++){const rw=23+i;put(w3,'C'+rw,i===0?1:`=+C${rw-1}+1`,{bd:1,al:{horizontal:'center'}});put(w3,'D'+rw,`=+IF(C${rw}>채권수,"",OFFSET('${S2}'!$D$${D0},$C${rw}-1,0))`,{bd:1});
+  const row3=i=>{const rw=23+i;put(w3,'C'+rw,i===0?1:`=+C${rw-1}+1`,{bd:1,al:{horizontal:'center'}});put(w3,'D'+rw,`=+IF(C${rw}>채권수,"",OFFSET('${S2}'!$D$${D0},$C${rw}-1,0))`,{bd:1});
     put(w3,'E'+rw,`=+IFERROR(IF(C${rw}>채권수,"",OFFSET('${S2}'!$D$${D0},C${rw}-1,${MI}-1)-OFFSET('${S2}'!$D$${D0},C${rw}-1,${MI})),"")`,{fmt:N,bd:1});
-    put(w3,'F'+rw,`=+I${rw-1}+E${rw}`,{fmt:N,bd:1});put(w3,'G'+rw,`=IF(F${rw}>0,ROUNDUP(F${rw}/H${rw},0),0)`,{bd:1,al:{horizontal:'center'},font:B});put(w3,'H'+rw,'=+$E$15',{fmt:N,bd:1});put(w3,'I'+rw,`=F${rw}-(G${rw}*H${rw})`,{fmt:N,bd:1})}
+    put(w3,'F'+rw,`=+I${rw-1}+E${rw}`,{fmt:N,bd:1});put(w3,'G'+rw,`=IF(F${rw}>0,ROUNDUP(F${rw}/H${rw},0),0)`,{bd:1,al:{horizontal:'center'},font:B});put(w3,'H'+rw,'=+$E$15',{fmt:N,bd:1});put(w3,'I'+rw,`=F${rw}-(G${rw}*H${rw})`,{fmt:N,bd:1})};
+  if(!BIG)for(let i=0;i<N2;i++)row3(i);
+  else{row3(0);regBig(wb,w3,23,LAST3,i=>{const rw=23+i;return [{c:'C',f:i===0?undefined:`C${rw-1}+1`,n:i===0?1:undefined},{c:'D',f:`IF(C${rw}>채권수,"",OFFSET('${S2}'!$D$${D0},$C${rw}-1,0))`},
+      {c:'E',f:`IFERROR(IF(C${rw}>채권수,"",OFFSET('${S2}'!$D$${D0},C${rw}-1,${MI}-1)-OFFSET('${S2}'!$D$${D0},C${rw}-1,${MI})),"")`},{c:'F',f:`I${rw-1}+E${rw}`},{c:'G',f:`IF(F${rw}>0,ROUNDUP(F${rw}/H${rw},0),0)`},{c:'H',f:'$E$15'},{c:'I',f:`F${rw}-(G${rw}*H${rw})`}]})}
   put(w3,'C'+SUM3,'합계',{res:1});put(w3,'D'+SUM3,'',{res:1});['E','G'].forEach(cl=>put(w3,cl+SUM3,`=SUM(${cl}23:${cl}${LAST3+1})`,{res:1,fmt:cl==='E'?N:undefined,al:cl==='G'?{horizontal:'center'}:undefined}));
   put(w3,'F'+SUM3,'',{res:1});put(w3,'H'+SUM3,'',{res:1});put(w3,'I'+SUM3,`=+VLOOKUP(MAX($C$23:$C$${LAST3+1}),$C$23:$I$${LAST3+1},7,0)`,{fmt:N,res:1});
   put(w3,'C'+CMA,'CMA reconciliation',{font:B});put(w3,'C'+(CMA+1),'임의출발점',{bd:1});put(w3,'D'+(CMA+1),'=+E16',{fmt:N,bd:1});put(w3,'C'+(CMA+2),'Selection remainder',{bd:1});put(w3,'D'+(CMA+2),`=+I${SUM3}`,{fmt:N,bd:1});
@@ -1199,9 +1325,11 @@ async function buildUA1000(a){
   w3.views=[{state:'frozen',ySplit:22,showGridLines:false}];cfBool(w3,`E${CMA+5}`);cfText(w3,`G23:G${LAST3}`,'1','FFC6EFCE','FF006100');
   /* --- PBC / 원장 --- */
   put(wp,'A1','PBC>>',{font:T14});wp.properties.tabColor={argb:'FFBFBFBF'};
-  const extra=subExtra(a);
-  const li=writeLedgerSheet(wr,a,r,null,r.allRows,`${sideK} 발생 행(이월·마감·상쇄 제외)이 ${NM}-2 모집단. SAMPLE = Key Item + MUS 선정 · O열 구분: 이월/마감/상쇄`+(extra?' · P열부터 원본 열':''),r.tags,extra);
-  if(extra)writePivotSheet(wb,a,r,SL,LN,li.X0);
+  const skL=a.src&&a.src.startsWith('sub:')?a.src:'gl';
+  const dispCols=reqColsFor(skL).filter(c=>!['std:code','std:dr','std:cr'].includes(c.key));
+  const li=writeLedgerSheet2(wr,a,r,r.allRows,`${sideK} 발생 행(이월·마감·상쇄 제외)이 ${NM}-2 모집단. SAMPLE = Key Item + MUS 선정 · F열 구분: 이월/마감/상쇄/제외 · G열부터 ③에서 선택한 표시 열`,r.tags,dispCols,{wb});
+  if(subExtra(a)){const sub=subOf(a.src.slice(4));const [p0,p1]=sub.pivotCols;const c0=p0>=0?li.letterOf('col:'+p0):null,c1=p1>=0?li.letterOf('col:'+p1):null;
+    if((p0<0||c0)&&(p1<0||c1))writePivotSheet(wb,a,r,SL,LN,{c0,c1});else writePivotValuesOnly(wb,a,r)}
   put(w2,'C'+(RK-1),(r.carryRows.length?`※ 이월 전표 ${r.carryRows.length}건(${num(r.carrySum)})은 기초잔액이므로 당기 발생액·모집단에서 제외함. `:'')+(r.closeRows.length?`※ 결산·마감 전표 ${r.closeRows.length}건(차 ${num(r.closeDr)} / 대 ${num(r.closeCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '마감'). `:'')+(r.ruleRows.length?`※ 제외규칙[대사+모집단] ${a.ex.filter(e=>e.scope==='both').map(e=>`${e.name||'제외'}: ${exFieldLabel(e.field,a)} ${(EXOPS.find(o=>o[0]===(e.op||'contains'))||[,'포함'])[1]} "${e.kw}"`).join(' / ')} 해당 ${r.ruleRows.length}건(차 ${num(r.ruleDr)} / 대 ${num(r.ruleCr)})은 거래가 아니므로 대사·모집단에서 제외함(원장 O열 '제외'). `:'')+(r.offRows.length?`※ 상쇄 전표 ${r.offRows.length/2|0}쌍(${a.offsetKw})은 양수·음수가 0으로 상쇄되어 모집단에서 제외함(원장 O열 '상쇄').`:''),{note:1});
   wb.definedNames.add(`'${S2}'!$D$${R_CNT}`,'채권수');wb.definedNames.add(`'${S2}'!$C$${D0}:$J$${LAST2+1}`,'키아이템');
   return wb;
@@ -1209,53 +1337,132 @@ async function buildUA1000(a){
 
 const LCOLS=[['key','전표코드'],['code','계정코드'],['name','계정명'],['date','날짜'],['desc','적요란'],['vcode','코드'],['vendor','거래처명'],['biz','사업자번호'],['dr','차변'],['cr','대변'],['bal','잔액'],['proj','프로젝트']];
 function subExtra(a){const sub=a.src&&a.src.startsWith('sub:')?subOf(a.src.slice(4)):null;if(!sub)return null;return {hdr:sub.hdr,val:(r,ci)=>subRawVal(sub,r,ci)}}
-function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags,extra){
+function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags,extra,opts){
+  opts=opts||{};
+  if(opts.cols)return writeReqSheet(ws,a,r,evid,opts);
   const order=['code','name','date','desc','vcode','vendor','biz','dr','cr','bal','proj','key'];
-  const rows=rowsIn||r.all;
   const incIdx=new Map(r.inc.map((x,i)=>[x.idx,i]));
+  const allRows=rowsIn||r.all;
+  const isSelRow=x=>{const pi=incIdx.get(x.idx);return pi!=null&&r.selIdx.has(pi)};
+  const rows=opts.onlySel?allRows.filter(isSelRow):allRows;
+  const noOf=x=>opts.onlySel?(incIdx.get(x.idx)+1):(allRows.indexOf(x)+1);   // 선정건만: 모집단 No.(UA-2·UA-3와 동일)
   put(ws,'C1','회사명  :  '+$('companyFull').value,{font:B});if(noteText)put(ws,'E1',noteText,{note:1});
   put(ws,'J1',`=SUBTOTAL(9,J3:J${rows.length+2})`,{fmt:N,res:1});put(ws,'K1',`=SUBTOTAL(9,K3:K${rows.length+2})`,{fmt:N,res:1});
   const hdr=['SAMPLE','NO.',...order.map(k=>LCOLS.find(c=>c[0]===k)[1])];
-  const ev=evid||[];ev.forEach((e,i)=>{put(ws,col(14+i)+'1','증빙 '+(i+1),{sub:1,al:{horizontal:'center'}});hdr.push(e)});
-  if(tags)hdr.push('구분');
+  const ev=evid||[];let EV0=hdr.length;
+  if(!opts.evidAtEnd){ev.forEach(e=>hdr.push(e))}
+  const TG0=hdr.length;if(tags)hdr.push('구분');
   const X0=hdr.length;if(extra){extra.hdr.forEach(h=>hdr.push(h.label));put(ws,col(X0)+'1','▶ 원본 열',{sub:1})}
+  if(opts.evidAtEnd){EV0=hdr.length;ev.forEach(e=>hdr.push(e))}
+  ev.forEach((e,i)=>put(ws,col(EV0+i)+'1','증빙 '+(i+1),{sub:1,al:{horizontal:'center'}}));
   hdr.forEach((h,i)=>put(ws,col(i)+'2',h,{hdr:1}));ws.getRow(2).height=24;
-  const listStart=rows.length+5;const sel=[];
-  rows.forEach((x,i)=>{
-    const rw=3+i,no=i+1;const pi=incIdx.get(x.idx);const isSel=pi!=null&&r.selIdx.has(pi);if(isSel)sel.push(no);
+  const listStart=rows.length+5;const sel=[];let hidden=0;
+  const BIGL=rows.length>BIG_ROWS&&opts.wb&&!opts.onlySel&&!opts.hideOthers;
+  const rowL=(x,i)=>{
+    const rw=3+i,no=noOf(x);const isSel=isSelRow(x);
     put(ws,'B'+rw,no,{al:{horizontal:'center'}});order.forEach((k,j)=>{const v=x[k];put(ws,col(2+j)+rw,(k==='dr'||k==='cr'||k==='bal')?(v||0):(v??''),{fmt:(k==='dr'||k==='cr'||k==='bal')?N:undefined})});
-    ev.forEach((e,j)=>put(ws,col(14+j)+rw,'',{bd:isSel?1:undefined}));
-    if(tags){const t=tags.get(x.idx)||'';put(ws,col(14+ev.length)+rw,t,{al:{horizontal:'center'},fill:t?'FFFCE4D6':undefined})}
+    ev.forEach((e,j)=>put(ws,col(EV0+j)+rw,'',{bd:isSel?1:undefined,fill:isSel?'FFFFFFFF':undefined}));
+    if(tags){const t=tags.get(x.idx)||'';put(ws,col(TG0)+rw,t,{al:{horizontal:'center'},fill:t?'FFFCE4D6':undefined})}
     if(extra){extra.hdr.forEach((h,j)=>{const v=extra.val(x,h.i);if(v!=null&&v!=='')ws.getCell(rw,X0+1+j).value=(v instanceof Date)?fmtDate(v):v})}
+    if(opts.onlySel)put(ws,'A'+rw,'V',{font:B,al:{horizontal:'center'}});
+    else if(opts.hideOthers&&!isSel){ws.getRow(rw).hidden=true;hidden++}
+  };
+  rows.forEach((x,i)=>{if(isSelRow(x))sel.push(noOf(x))});
+  let listEnd=listStart;
+  if(!opts.onlySel)listEnd=listStart+Math.max(1,sel.length)-1;
+  if(!BIGL){rows.forEach(rowL)}
+  else{rowL({...rows[0],...Object.fromEntries(order.map(k=>[k,['dr','cr','bal'].includes(k)?1:'x']))},0);put(ws,'A3',`=IFERROR(VLOOKUP(B3,$B$${listStart}:$C$${listEnd},2,0),"")`,{font:B,al:{horizontal:'center'}});put(ws,col(TG0)+'3','이월',{al:{horizontal:'center'},fill:'FFFCE4D6'});
+    regBig(opts.wb,ws,3,rows.length+2,i=>{const x=rows[i],rw=3+i;const cells=[{c:'A',f:`IFERROR(VLOOKUP(B${rw},$B$${listStart}:$C$${listEnd},2,0),"")`},{c:'B',n:noOf(x)}];
+      order.forEach((k,j)=>{const v=x[k];const C=col(2+j);if(k==='dr'||k==='cr'||k==='bal')cells.push({c:C,n:v||0});else if(v!=null&&v!=='')cells.push({c:C,t:String(v)})});
+      if(tags){const t=tags.get(x.idx)||'';if(t)cells.push({c:col(TG0),t})}return cells})}
+  if(!opts.onlySel){
+    if(!BIGL)rows.forEach((x,i)=>put(ws,'A'+(3+i),`=IFERROR(VLOOKUP(B${3+i},$B$${listStart}:$C$${listEnd},2,0),"")`,{font:B,al:{horizontal:'center'}}));
+    put(ws,'B'+(listStart-1),'SAMPLE NO.',{hdr:1});put(ws,'C'+(listStart-1),'표시',{hdr:1});
+    sel.forEach((no,i)=>{put(ws,'B'+(listStart+i),no,{bd:1,al:{horizontal:'center'}});put(ws,'C'+(listStart+i),'V',{bd:1,al:{horizontal:'center'}})});
+  }
+  cfText(ws,`A3:A${rows.length+2}`,'V','FFC6EFCE','FF006100');
+  ws.autoFilter=`A2:${col(hdr.length-1)}${rows.length+2}`;ws.views=[{state:'frozen',ySplit:2,xSplit:2,showGridLines:false}];
+  widths(ws,{A:9,B:7,C:9,D:14,E:11,F:32,G:9,H:24,I:14,J:15,K:15,L:15,M:8,N:16});
+  ev.forEach((e,i)=>ws.getColumn(EV0+1+i).width=Math.max(12,e.length+2));
+  if(extra)extra.hdr.forEach((h,j)=>ws.getColumn(X0+1+j).width=Math.max(10,Math.min(30,h.label.length+4)));
+  return {listStart,listEnd,count:sel.length,X0,countRange:opts.onlySel?`A3:A${rows.length+2}`:null,hidden};
+}
+function writeReqSheet(ws,a,r,evid,opts){   // ③ 계정 시트: 원천별 선택 열
+  const cols=opts.cols,ev=evid||[];const incIdx=new Map(r.inc.map((x,i)=>[x.idx,i]));
+  const isSelRow=x=>{const pi=incIdx.get(x.idx);return pi!=null&&r.selIdx.has(pi)};
+  const allRows=r.all,rows=opts.onlySel?allRows.filter(isSelRow):allRows;const noOf=x=>opts.onlySel?(incIdx.get(x.idx)+1):(allRows.indexOf(x)+1);
+  put(ws,'C1','회사명  :  '+$('companyFull').value,{font:B});
+  const hdr=['SAMPLE','NO.',...cols.map(c=>c.label)];const EV0=hdr.length;ev.forEach((e,i)=>{hdr.push(e);put(ws,col(EV0+i)+'1','증빙 '+(i+1),{sub:1,al:{horizontal:'center'}})});
+  cols.forEach((c,j)=>{if(c.num)put(ws,col(2+j)+'1',`=SUBTOTAL(9,${col(2+j)}3:${col(2+j)}${rows.length+2})`,{fmt:N,res:1})});
+  hdr.forEach((h,i)=>put(ws,col(i)+'2',h,{hdr:1}));ws.getRow(2).height=24;
+  const listStart=rows.length+5,sel=[];
+  rows.forEach((x,i)=>{const rw=3+i,no=noOf(x),isSel=isSelRow(x);if(isSel)sel.push(no);
+    put(ws,'B'+rw,no,{al:{horizontal:'center'}});
+    cols.forEach((c,j)=>{let v=c.val(x);if(v==null)v='';if(c.num)v=v||0;if(v!=='')put(ws,col(2+j)+rw,v,{fmt:c.num?N:undefined})});
+    ev.forEach((e,j)=>put(ws,col(EV0+j)+rw,'',{bd:isSel?1:undefined}));
+    if(opts.onlySel)put(ws,'A'+rw,'V',{font:B,al:{horizontal:'center'}});else if(opts.hideOthers&&!isSel)ws.getRow(rw).hidden=true;
   });
-  const listEnd=listStart+Math.max(1,sel.length)-1;
-  rows.forEach((x,i)=>put(ws,'A'+(3+i),`=IFERROR(VLOOKUP(B${3+i},$B$${listStart}:$C$${listEnd},2,0),"")`,{font:B,al:{horizontal:'center'}}));
+  let listEnd=listStart;
+  if(!opts.onlySel){listEnd=listStart+Math.max(1,sel.length)-1;rows.forEach((x,i)=>put(ws,'A'+(3+i),`=IFERROR(VLOOKUP(B${3+i},$B$${listStart}:$C$${listEnd},2,0),"")`,{font:B,al:{horizontal:'center'}}));
+    put(ws,'B'+(listStart-1),'SAMPLE NO.',{hdr:1});put(ws,'C'+(listStart-1),'표시',{hdr:1});sel.forEach((no,i)=>{put(ws,'B'+(listStart+i),no,{bd:1,al:{horizontal:'center'}});put(ws,'C'+(listStart+i),'V',{bd:1,al:{horizontal:'center'}})})}
+  cfText(ws,`A3:A${rows.length+2}`,'V','FFC6EFCE','FF006100');
+  ws.autoFilter=`A2:${col(hdr.length-1)}${rows.length+2}`;ws.views=[{state:'frozen',ySplit:2,xSplit:2,showGridLines:false}];
+  ws.getColumn(1).width=9;ws.getColumn(2).width=7;cols.forEach((c,j)=>ws.getColumn(3+j).width=c.num?16:Math.max(10,Math.min(34,String(c.label).length+6)));ev.forEach((e,i)=>ws.getColumn(EV0+1+i).width=Math.max(12,e.length+2));
+  return {listStart,listEnd,count:sel.length,countRange:opts.onlySel?`A3:A${rows.length+2}`:null};
+}
+function writeLedgerSheet2(ws,a,r,rows,noteText,tags,cols,opts){   // ② 원장 시트: A SAMPLE·B NO.·C 계정코드/구분값·D 차변·E 대변·F 구분 + 선택 열(G~)
+  opts=opts||{};const incIdx=new Map(r.inc.map((x,i)=>[x.idx,i]));const isSel=x=>{const pi=incIdx.get(x.idx);return pi!=null&&r.selIdx.has(pi)};
+  const isSub=a.src&&a.src.startsWith('sub:');
+  put(ws,'C1','회사명  :  '+$('companyFull').value,{font:B});if(noteText)put(ws,'H1',noteText,{note:1});
+  put(ws,'D1',`=SUBTOTAL(9,D3:D${rows.length+2})`,{fmt:N,res:1});put(ws,'E1',`=SUBTOTAL(9,E3:E${rows.length+2})`,{fmt:N,res:1});
+  const hdr=['SAMPLE','NO.',isSub?'구분값':'계정코드','차변','대변','구분',...cols.map(c=>c.label)];
+  hdr.forEach((h,i)=>put(ws,col(i)+'2',h,{hdr:1}));ws.getRow(2).height=24;
+  const letterOf=key=>{const j=cols.findIndex(c=>c.key===key);return j<0?null:col(6+j)};
+  const listStart=rows.length+5,sel=[];rows.forEach((x,i)=>{if(isSel(x))sel.push(i+1)});const listEnd=listStart+Math.max(1,sel.length)-1;
+  const fillRow=(x,i)=>{const rw=3+i;put(ws,'A'+rw,`=IFERROR(VLOOKUP(B${rw},$B$${listStart}:$C$${listEnd},2,0),"")`,{font:B,al:{horizontal:'center'}});put(ws,'B'+rw,i+1,{al:{horizontal:'center'}});
+    put(ws,'C'+rw,String(x.code??''),{bd:1});put(ws,'D'+rw,x.dr||0,{fmt:N,bd:1});put(ws,'E'+rw,x.cr||0,{fmt:N,bd:1});
+    const t=tags?(tags.get(x.idx)||''):'';put(ws,'F'+rw,t,{al:{horizontal:'center'},fill:t?'FFFCE4D6':undefined});
+    cols.forEach((c,j)=>{let v=c.val(x);if(v==null||v==='')return;if(v instanceof Date)v=fmtDate(v);put(ws,col(6+j)+rw,c.num?(Number(v)||0):v,{fmt:c.num?N:undefined})})};
+  const BIGL=rows.length>BIG_ROWS&&opts.wb;
+  if(!BIGL)rows.forEach(fillRow);
+  else{const sample={...rows[0],code:'x',dr:1,cr:1};fillRow(sample,0);put(ws,'F3','이월',{al:{horizontal:'center'},fill:'FFFCE4D6'});cols.forEach((c,j)=>put(ws,col(6+j)+'3',c.num?1:'x',{fmt:c.num?N:undefined}));
+    regBig(opts.wb,ws,3,rows.length+2,i=>{const x=rows[i],rw=3+i;const cells=[{c:'A',f:`IFERROR(VLOOKUP(B${rw},$B$${listStart}:$C$${listEnd},2,0),"")`},{c:'B',n:i+1},{c:'C',t:String(x.code??'')},{c:'D',n:x.dr||0},{c:'E',n:x.cr||0}];
+      const t=tags?(tags.get(x.idx)||''):'';if(t)cells.push({c:'F',t});
+      cols.forEach((c,j)=>{let v=c.val(x);if(v==null||v==='')return;if(v instanceof Date)v=fmtDate(v);cells.push(c.num?{c:col(6+j),n:Number(v)||0}:{c:col(6+j),t:String(v)})});return cells})}
   put(ws,'B'+(listStart-1),'SAMPLE NO.',{hdr:1});put(ws,'C'+(listStart-1),'표시',{hdr:1});
   sel.forEach((no,i)=>{put(ws,'B'+(listStart+i),no,{bd:1,al:{horizontal:'center'}});put(ws,'C'+(listStart+i),'V',{bd:1,al:{horizontal:'center'}})});
   cfText(ws,`A3:A${rows.length+2}`,'V','FFC6EFCE','FF006100');
-  ws.autoFilter=`A2:${col(1+order.length)}${rows.length+2}`;ws.views=[{state:'frozen',ySplit:2,xSplit:2,showGridLines:false}];
-  widths(ws,{A:9,B:7,C:9,D:14,E:11,F:32,G:9,H:24,I:14,J:15,K:15,L:15,M:8,N:16});
-  ev.forEach((e,i)=>ws.getColumn(15+i).width=Math.max(12,e.length+2));
-  if(extra)extra.hdr.forEach((h,j)=>ws.getColumn(X0+1+j).width=Math.max(10,Math.min(30,h.label.length+4)));
-  return {listStart,listEnd,count:sel.length,X0};
+  ws.autoFilter=`A2:${col(hdr.length-1)}${rows.length+2}`;ws.views=[{state:'frozen',ySplit:2,xSplit:2,showGridLines:false}];
+  widths(ws,{A:9,B:7,C:12,D:16,E:16,F:8});cols.forEach((c,j)=>ws.getColumn(7+j).width=c.num?16:Math.max(10,Math.min(34,String(c.label).length+6)));
+  return {listStart,listEnd,count:sel.length,letterOf};
 }
-function writePivotSheet(wb,a,r,SL,LN,X0){   // 보조원장 집계표: 행=집계열1 × 구분값, 열=집계열2 (수식) + 전체 원장 집계(값)
+function writePivotValuesOnly(wb,a,r){   // 대용량: 전체 원장 집계(값)만
   const sub=subOf(a.src.slice(4));const [p0,p1]=sub.pivotCols;const ws=wb.addWorksheet('매출장 집계');ws.views=[{showGridLines:false}];
-  const colOf=ci=>{const j=sub.hdr.findIndex(h=>h.i===ci);return j<0?null:col(X0+j)};
-  const c0=p0>=0?colOf(p0):null,c1=p1>=0?colOf(p1):null;
+  const lab=ci=>(sub.hdr.find(h=>h.i===ci)||{}).label||'';const v0=x=>p0>=0?String(subRawVal(sub,x,p0)??''):'',v1=x=>p1>=0?String(subRawVal(sub,x,p1)??''):'';
+  put(ws,'B2',$('company').value,{font:T14});put(ws,'B3',`${a.name} — ${sub.name} 집계 (대용량: 값으로 기재)`,{font:T11});
+  const all0=[...new Set(sub.rows.map(v0))].sort(),allC=sub.cats.map(c=>c.cat),all1=[...new Set(sub.rows.map(v1))].sort();let row=5;
+  put(ws,'B'+row,p0>=0?lab(p0):'전체',{hdr:1});put(ws,'C'+row,'구분값',{hdr:1});all1.forEach((v,i)=>put(ws,col(3+i)+row,p1>=0?(v||'(비어 있음)'):'금액',{hdr:1}));put(ws,col(3+all1.length)+row,'총합계',{hdr:1});row++;
+  const agg={};sub.rows.forEach(x=>{const k=[v0(x),x.code,v1(x)].join('\u0001');agg[k]=(agg[k]||0)+x.amt0});const s2=row;
+  all0.forEach(a0=>allC.forEach(cat=>{const vs=all1.map(b1=>agg[[a0,cat,b1].join('\u0001')]||0);if(!vs.some(Boolean))return;put(ws,'B'+row,a0||'(비어 있음)',{bd:1});put(ws,'C'+row,cat,{bd:1});vs.forEach((v,i)=>put(ws,col(3+i)+row,v,{fmt:N,bd:1}));put(ws,col(3+all1.length)+row,`=SUM(${col(3)}${row}:${col(2+all1.length)}${row})`,{fmt:N,res:1});row++}));
+  put(ws,'B'+row,'총합계',{res:1});put(ws,'C'+row,'',{res:1});for(let i=0;i<=all1.length;i++)put(ws,col(3+i)+row,`=SUM(${col(3+i)}${s2}:${col(3+i)}${row-1})`,{fmt:N,res:1});
+  widths(ws,{A:1.3,B:22,C:18});for(let i=0;i<=all1.length;i++)ws.getColumn(4+i).width=18;
+}
+function writePivotSheet(wb,a,r,SL,LN,L){   // 보조원장 집계표: 행=집계열1 × 구분값, 열=집계열2 (수식) + 전체 원장 집계(값)
+  const sub=subOf(a.src.slice(4));const [p0,p1]=sub.pivotCols;const ws=wb.addWorksheet('매출장 집계');ws.views=[{showGridLines:false}];
+  const c0=L.c0,c1=L.c1;
   const lab=ci=>(sub.hdr.find(h=>h.i===ci)||{}).label||'';
   put(ws,'B2',$('company').value,{font:T14});put(ws,'B3',`${a.name} — ${sub.name} 집계`,{font:T11});
   put(ws,'B5',`1. 본 조서 모집단 행 집계 (${SL} 시트 수식)`,{sec:1});band(ws,5,2,10);
   const vals0=[...new Set(r.allRows.map(x=>c0?String(subRawVal(sub,x,p0)??''):''))].sort(),vals1=[...new Set(r.allRows.map(x=>c1?String(subRawVal(sub,x,p1)??''):''))].sort();
   const cats=a.cats;let row=7;
   put(ws,'B'+row,c0?lab(p0):'전체',{hdr:1});put(ws,'C'+row,'구분값',{hdr:1});vals1.forEach((v,i)=>put(ws,col(3+i)+row,c1?(v||'(비어 있음)'):'금액',{hdr:1}));put(ws,col(3+vals1.length)+row,'총합계',{hdr:1});row++;
-  const amtF=(cond)=>`SUMIFS('${SL}'!$K$3:$K$${LN},${cond})-SUMIFS('${SL}'!$J$3:$J$${LN},${cond})`;
+  const amtF=(cond)=>`SUMIFS('${SL}'!$E$3:$E$${LN},${cond})-SUMIFS('${SL}'!$D$3:$D$${LN},${cond})`;
   const start=row;
   vals0.forEach(v0=>cats.forEach(cat=>{put(ws,'B'+row,v0||'(비어 있음)',{bd:1});put(ws,'C'+row,cat,{bd:1});
     vals1.forEach((v1,i)=>{let cond=`'${SL}'!$C$3:$C$${LN},"${cat}"`;if(c0)cond+=`,'${SL}'!$${c0}$3:$${c0}$${LN},"${v0===''?'=':v0.replace(/"/g,'""')}"`;if(c1)cond+=`,'${SL}'!$${c1}$3:$${c1}$${LN},"${v1===''?'=':v1.replace(/"/g,'""')}"`;put(ws,col(3+i)+row,'='+amtF(cond),{fmt:N,bd:1})});
     put(ws,col(3+vals1.length)+row,`=SUM(${col(3)}${row}:${col(2+vals1.length)}${row})`,{fmt:N,res:1});row++}));
   put(ws,'B'+row,'총합계',{res:1});put(ws,'C'+row,'',{res:1});for(let i=0;i<=vals1.length;i++)put(ws,col(3+i)+row,`=SUM(${col(3+i)}${start}:${col(3+i)}${row-1})`,{fmt:N,res:1});
-  put(ws,'B'+(row+1),`check: 총합계 = ${SL} 순액`,{note:1});put(ws,col(3+vals1.length)+(row+1),`=ROUND(${col(3+vals1.length)}${row}-(SUM('${SL}'!$K$3:$K$${LN})-SUM('${SL}'!$J$3:$J$${LN})),0)=0`,{al:{horizontal:'center'}});cfBool(ws,`${col(3+vals1.length)}${row+1}`);
+  put(ws,'B'+(row+1),`check: 총합계 = ${SL} 순액`,{note:1});put(ws,col(3+vals1.length)+(row+1),`=ROUND(${col(3+vals1.length)}${row}-(SUM('${SL}'!$E$3:$E$${LN})-SUM('${SL}'!$D$3:$D$${LN})),0)=0`,{al:{horizontal:'center'}});cfBool(ws,`${col(3+vals1.length)}${row+1}`);
   row+=3;put(ws,'B'+row,`2. ${sub.name} 전체 집계 (모든 구분값, 값)`,{sec:1});band(ws,row,2,10);row+=2;
   const all0=[...new Set(sub.rows.map(x=>c0?String(subRawVal(sub,x,p0)??''):''))].sort(),allC=sub.cats.map(c=>c.cat),all1=[...new Set(sub.rows.map(x=>c1?String(subRawVal(sub,x,p1)??''):''))].sort();
   put(ws,'B'+row,c0?lab(p0):'전체',{hdr:1});put(ws,'C'+row,'구분값',{hdr:1});all1.forEach((v,i)=>put(ws,col(3+i)+row,c1?(v||'(비어 있음)'):'금액',{hdr:1}));put(ws,col(3+all1.length)+row,'총합계',{hdr:1});row++;
@@ -1267,11 +1474,36 @@ function writePivotSheet(wb,a,r,SL,LN,X0){   // 보조원장 집계표: 행=집�
 }
 
 /* ============================ STAGE 3 ============================ */
+/* 샘플요청 시트 표시 열 — 원천별 정의 */
+function reqColDefs(srcKey){   // [{key,label,val(x),num}]
+  if(srcKey==='gl'){
+    const std=['code','name','date','desc','vcode','vendor','biz','dr','cr','bal','proj','key'].map(k=>({key:'std:'+k,label:LCOLS.find(c=>c[0]===k)[1],val:x=>x[k],num:['dr','cr','bal'].includes(k)}));
+    const orig=(S.ledger.hdr||[]).map(h=>({key:'col:'+h.i,label:h.label,val:x=>exFieldVal(x,'col:'+h.i),num:false}));
+    return {std,orig,defaults:std.map(c=>c.key)};
+  }
+  const sub=subOf(srcKey.slice(4));if(!sub)return {std:[],orig:[],defaults:[]};
+  const std=[{key:'std:key',label:'전표코드(식별)',val:x=>x.key},{key:'std:code',label:'구분값',val:x=>x.code},{key:'std:amt',label:'금액(계정 방향)',val:x=>x.amt,num:true},{key:'std:date',label:'날짜',val:x=>x.date},{key:'std:vendor',label:'거래처명',val:x=>x.vendor},{key:'std:desc',label:'품목/적요',val:x=>x.desc}];
+  const orig=sub.hdr.map(h=>({key:'col:'+h.i,label:h.label,val:x=>{const v=subRawVal(sub,x,h.i);return v instanceof Date?fmtDate(v):v},num:false}));
+  return {std,orig,defaults:['std:key','std:code','std:amt',...orig.map(c=>c.key)]};
+}
+function reqColsFor(srcKey){const d=reqColDefs(srcKey);const sel=S.reqCols[srcKey]||d.defaults;const all=[...d.std,...d.orig];return sel.map(k=>all.find(c=>c.key===k)).filter(Boolean)}
+function renderReqCols(){
+  const box=$('reqColsBox');const srcs=[...new Set(S.accts.filter(a=>a._r).map(a=>a.src&&a.src.startsWith('sub:')?a.src:'gl'))];
+  if(!srcs.length){box.innerHTML='<div class="hint">②에서 표본이 확정된 계정이 없습니다.</div>';return}
+  box.innerHTML=srcs.map(sk=>{const d=reqColDefs(sk);const sel=new Set(S.reqCols[sk]||d.defaults);const name=sk==='gl'?'총계정원장':'보조 원장 · '+((subOf(sk.slice(4))||{}).name||'');
+    const cb=c=>`<label><input type="checkbox" data-rc="${sk}" data-k="${esc(c.key)}" ${sel.has(c.key)?'checked':''}>${esc(c.label)}</label>`;
+    return `<div style="margin-bottom:10px"><div style="font-size:12.5px;font-weight:600;margin:4px 0">${esc(name)} <span class="hint" style="margin:0;font-weight:400">— 선택 <span data-rccnt="${sk}">${[...sel].length}</span>열 · <button class="link" data-rcall="${sk}" data-on="1">전체</button> / <button class="link" data-rcall="${sk}" data-on="0">해제</button> / <button class="link" data-rcall="${sk}" data-on="d">기본값</button></span></div>
+      <div class="hint" style="margin:2px 0">표준 열</div><div class="codes" style="max-height:90px">${d.std.map(cb).join('')}</div>
+      ${d.orig.length?`<div class="hint" style="margin:4px 0 2px">원본 열</div><div class="codes" style="max-height:110px">${d.orig.map(cb).join('')}</div>`:''}</div>`}).join('');
+  box.querySelectorAll('[data-rc]').forEach(c=>c.onchange=()=>{const sk=c.dataset.rc;const d=reqColDefs(sk);const cur=new Set(S.reqCols[sk]||d.defaults);c.checked?cur.add(c.dataset.k):cur.delete(c.dataset.k);
+    const order=[...d.std,...d.orig].map(x=>x.key);S.reqCols[sk]=order.filter(k=>cur.has(k));const cnt=box.querySelector(`[data-rccnt="${sk}"]`);if(cnt)cnt.textContent=S.reqCols[sk].length;renderReqPreview()});
+  box.querySelectorAll('[data-rcall]').forEach(b=>b.onclick=()=>{const sk=b.dataset.rcall;const d=reqColDefs(sk);S.reqCols[sk]=b.dataset.on==='1'?[...d.std,...d.orig].map(x=>x.key):(b.dataset.on==='0'?[]:d.defaults.slice());keepScroll(box,renderReqCols);renderReqPreview()});
+}
 function evidOf(a){if(a.evid&&a.evid.trim())return a.evid.split(',').map(s=>s.trim()).filter(Boolean);const el=$('ev'+a.evType);return (el?el.value:'').split(',').map(s=>s.trim()).filter(Boolean)}
 let REQTAB=null;
 function renderReq(){
   const ready=S.accts.filter(a=>a._r);
-  if(!ready.length){$('reqTbl').innerHTML='<tr><td class="hint">②에서 표본이 확정된 계정이 없습니다.</td></tr>';$('reqTabs').innerHTML='';$('reqPrev').innerHTML='';return}
+  if(!ready.length){$('reqTbl').innerHTML='<tr><td class="hint">②에서 표본이 확정된 계정이 없습니다.</td></tr>';$('reqTabs').innerHTML='';$('reqPrev').innerHTML='';renderReqCols();return}
   let h='<tr><th>계정과목</th><th class="n">샘플 건수</th><th>유형</th><th>증빙 목록(쉼표 구분, 비우면 유형 기본값)</th></tr>';
   ready.forEach(a=>{h+=`<tr><td>${esc(a.name)}</td><td class="n">${a._r.selIdx.size}</td>
     <td><select data-id="${a.id}" data-f="evType">${['매입','국내매출','해외매출','기타'].map(t=>`<option ${a.evType===t?'selected':''}>${t}</option>`).join('')}</select></td>
@@ -1279,14 +1511,20 @@ function renderReq(){
   h+=`<tr class="hdr"><td>합계</td><td class="n">${ready.reduce((s,a)=>s+a._r.selIdx.size,0)}</td><td colspan="2"></td></tr>`;
   $('reqTbl').innerHTML=h;
   $('reqTbl').querySelectorAll('[data-f]').forEach(el=>el.onchange=()=>{const a=S.accts.find(x=>x.id===el.dataset.id);a[el.dataset.f]=el.value;renderReq()});
-  $('reqSum').textContent=`${ready.length}계정`;
+  $('reqSum').textContent=`${ready.length}계정`;renderReqCols();
   if(!REQTAB||!ready.some(a=>a.id===REQTAB))REQTAB=ready[0].id;
   $('reqTabs').innerHTML=ready.map(a=>`<button role="tab" aria-selected="${a.id===REQTAB}" data-id="${a.id}">${esc(a.name)} (${a._r.selIdx.size})</button>`).join('');
   $('reqTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{REQTAB=b.dataset.id;renderReq()});
-  const a=ready.find(x=>x.id===REQTAB),r=a._r;
+  renderReqPreview();
+}
+function renderReqPreview(){   // 샘플 목록 미리보기 — 선택한 표시 열 그대로
+  const a=S.accts.find(x=>x.id===REQTAB);if(!a||!a._r){$('reqPrev').innerHTML='';return}
+  const r=a._r,sk=a.src&&a.src.startsWith('sub:')?a.src:'gl',cols=reqColsFor(sk);
   const sel=r.inc.map((x,i)=>({...x,no:i+1})).filter((x,i)=>r.selIdx.has(i));
-  $('reqPrev').innerHTML='<tr><th>No.</th><th>날짜</th><th>전표코드</th><th>거래처</th><th>적요</th><th class="n">금액</th><th>구분</th></tr>'+
-    sel.map(x=>`<tr><td>${x.no}</td><td>${esc(x.date)}</td><td>${esc(x.key)}</td><td>${esc(x.vendor)}</td><td>${esc(x.desc)}</td><td class="n">${num(x.amt)}</td><td>${x.amt>=r.T?'Key':'MUS'}</td></tr>`).join('');
+  const fmtv=(c,x)=>{let v=c.val(x);if(v==null||v==='')return '';if(c.num)return num(v);return esc(v instanceof Date?fmtDate(v):v)};
+  $('reqPrev').innerHTML=`<tr><th>No.</th>${cols.map(c=>`<th${c.num?' class="n"':''}>${esc(c.label)}</th>`).join('')}<th>구분</th></tr>`+
+    sel.map(x=>`<tr><td>${x.no}</td>${cols.map(c=>`<td${c.num?' class="n"':''}>${fmtv(c,x)}</td>`).join('')}<td>${x.amt>=r.T?'Key':'MUS'}</td></tr>`).join('')
+    +(cols.length?'':'<tr><td colspan="2" class="hint">표시 열이 선택되지 않았습니다 (SAMPLE·NO.·증빙만 출력됨)</td></tr>');
 }
 ['ev매입','ev국내매출','ev해외매출','ev기타'].forEach(id=>$(id).onchange=renderReq);
 async function buildReq(){
@@ -1299,8 +1537,10 @@ async function buildReq(){
   ready.forEach((a,i)=>{
     const sn=(a.name.replace(/[\[\]\*\?\/\\:]/g,'')+'(양수)').slice(0,31);
     const sh=wb.addWorksheet(sn);const ev=evidOf(a);
-    const info=writeLedgerSheet(sh,a,a._r,ev,null,null,null,subExtra(a));
-    const rw=3+i;put(ws,'B'+rw,a.name,{bd:1});put(ws,'C'+rw,`=COUNTA('${sn}'!C${info.listStart}:C${info.listEnd})`,{bd:1,al:{horizontal:'center'}});
+    const mode=a._r.all.length>BIG_ROWS?'sel':$('reqMode').value;
+    const sk=a.src&&a.src.startsWith('sub:')?a.src:'gl';
+    const info=writeLedgerSheet(sh,a,a._r,ev,null,null,null,null,{cols:reqColsFor(sk),onlySel:mode==='sel',hideOthers:mode==='hide'});
+    const rw=3+i;put(ws,'B'+rw,a.name,{bd:1});put(ws,'C'+rw,info.countRange?`=COUNTA('${sn}'!${info.countRange})`:`=COUNTA('${sn}'!C${info.listStart}:C${info.listEnd})`,{bd:1,al:{horizontal:'center'}});
     ev.slice(0,7).forEach((e,j)=>put(ws,col(3+j)+rw,e,{bd:1}));for(let j=ev.length;j<7;j++)put(ws,col(3+j)+rw,undefined,{bd:1});
     const c=ws.getCell('K'+rw);c.value={text:sn+'!A1',hyperlink:`#'${sn}'!A1`};c.font=FONT({color:{argb:'FF0563C1'},underline:true});c.border=BD;
   });
@@ -1326,10 +1566,10 @@ function encodeExt(){return encodeExtOf(S.ledger,true)}
 function snapshot(){
   const EXTC=[];
   const inputs={};STATE_IDS().forEach(el=>inputs[el.id]=el.type==='checkbox'?el.checked:el.value);
-  return {app:'손익계정 TOD 파이프라인',v:'3.0.1',saved:new Date().toISOString(),inputs,stmts:S.stmts,
+  return {app:'손익계정 TOD 파이프라인',v:APP_VERSION,saved:new Date().toISOString(),inputs,stmts:S.stmts,
     ledger:{hdr:S.ledger.hdr,map:S.ledger.map,cols:ROWKEYS,rowsArr:S.ledger.rows.map(r=>ROWKEYS.map(k=>r[k])),ext2:encodeExt(),codes:S.ledger.codes,stat:S.ledger.stat,sheet:$('lSheet').value,hdrRow:$('lHdr').value},
-    subs:S.subs.map(sub=>({id:sub.id,name:sub.name,sheet:sub.sheet,hdrRow:sub.hdrRow,hdr:sub.hdr,map:sub.map,keyCols:sub.keyCols,catCol:sub.catCol,mapText:sub.mapText,pivotCols:sub.pivotCols,stat:sub.stat,cols:SUBKEYS,rowsArr:sub.rows.map(r=>SUBKEYS.map(k=>r[k])),ext2:encodeExtOf(sub,false)})),
-    accts:S.accts.map(a=>{const o={...a};delete o._r;return o}),reqTab:REQTAB};
+    subs:S.subs.map(sub=>({id:sub.id,name:sub.name,sign:sub.sign,big:sub.big,idCols:sub.idCols,idSep:sub.idSep,keyUniq:sub.keyUniq,keyDup:sub.keyDup,sheet:sub.sheet,hdrRow:sub.hdrRow,hdr:sub.hdr,map:sub.map,keyCols:sub.keyCols,catCol:sub.catCol,mapText:sub.mapText,pivotCols:sub.pivotCols,stat:sub.stat,cols:SUBKEYS,rowsArr:sub.rows.map(r=>SUBKEYS.map(k=>r[k])),ext2:encodeExtOf(sub,false)})),
+    accts:S.accts.map(a=>{const o={...a};delete o._r;return o}),reqTab:REQTAB,reqCols:S.reqCols};
 }
 $('saveJ').onclick=()=>{const j=JSON.stringify(snapshot());download(new TextEncoder().encode(j),`TOD작업_${$('company').value}_${$('period').value}_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.json`,'application/json');setStatus('작업 상태를 저장했습니다.')};
 $('loadJ').onclick=()=>$('fileJ').click();
@@ -1348,14 +1588,114 @@ function restore(d){
     $('lSheet').innerHTML=`<option>${esc(d.ledger.sheet||'원장')}</option>`;$('lHdr').value=d.ledger.hdrRow||1;$('ledgerBox').style.display='block';
     renderLMap();const st=S.ledger.stat;$('lStat').textContent=(st?`원장 데이터 ${st.read.toLocaleString()}행 읽음 → 인식 ${st.rows.toLocaleString()}행 (금액 0 행 ${(st.zero||0).toLocaleString()} 포함)`:`${S.ledger.rows.length.toLocaleString()}행`)+` · 계정코드 ${S.ledger.codes.length}개 (저장 파일에서 복원 — 매핑을 바꾸려면 원장 재업로드)`;
   }
-  S.subs=(d.subs||[]).map(x=>{const sub={...x,wb:null,raw:[],rows:(x.rowsArr||[]).map((ar,i)=>{const o={};(x.cols||SUBKEYS).forEach((k,j)=>o[k]=ar[j]);o.pos=i;o.src=x.id;o.bal=0;o.proj='';o.code='';o.name='';return o}),ext:x.ext2||null,mapTable:{},cats:[],unmapped:[]};delete sub.rowsArr;delete sub.ext2;return sub});
+  S.subs=(d.subs||[]).map(x=>{const sub={sign:'rev',...x,wb:null,raw:[],rows:(x.rowsArr||[]).map((ar,i)=>{const o={};(x.cols||SUBKEYS).forEach((k,j)=>o[k]=ar[j]);o.pos=i;o.src=x.id;o.bal=0;o.proj='';o.code='';o.name='';return o}),ext:x.ext2||null,mapTable:{},cats:[],unmapped:[]};delete sub.rowsArr;delete sub.ext2;return sub});
   S.accts=(d.accts||[]).map(a=>({recon:'gross',src:'gl',cats:[],carryKw:'전기이월,기초이월',closeKw:'결산분개,손익대체,결산대체,마감분개',offsetKw:'',...a,ex:(a.ex||[]).map(e=>({field:'pdesc',op:'contains',scope:'pop',...e})),_r:null,_q:''}));
-  REQTAB=d.reqTab||null;
+  REQTAB=d.reqTab||null;S.reqCols=d.reqCols||{};
   S.accts.forEach(a=>autoSide(a));
   S.subs.forEach(sub=>subClassify(sub));
   recomputeScope();renderAccts();renderReq();
   setStatus(`저장 상태를 불러왔습니다 (${(d.saved||'').slice(0,16).replace('T',' ')}).`);
 }
+
+/* ============================ 툴팁 · 설명서 · 시작 가이드 ============================ */
+const TIPS={
+  // ① 인스코프
+  '회사명':'조서 머리에 들어갈 회사명. 공식 명칭은 ③ 샘플요청 파일에 씁니다.','기준일':'보고기간 종료일(yyyy-mm-dd). 조서 표기와 재무제표 라벨에 쓰입니다.','기간 표기':'조서에 표시할 기간 문구 (예: 2026-09-30 (3분기)).',
+  '경과 월수(연환산)':'분기·반기면 3·6·9. PM 초과 판정 때 손익금액×12/월수로 연환산합니다. 벤치마크가 기간 손익이면 아래 체크박스도 켜세요.',
+  '모집단 기간 서술':'UA-2 「① 모집단: … 발생한 …」 문구에 들어갑니다.','산정방식':'벤치마크×비율로 TM→PM→SAD를 계산하거나, 상위 조서에서 받은 값을 직접 입력합니다.',
+  '벤치마크 명칭':'중요성 산정 기준(예: 매출액(FY2025)). 조서 M열에 표시.','벤치마크 금액':'천단위 쉼표는 자동. 기간 손익이면 아래 연환산 체크.',
+  'TM 비율(%)':'재무제표 전체 중요성 = 벤치마크 × 비율.','PM = TM ×(%)':'수행중요성 비율(보통 75%).','SAD = TM ×(%)':'명백히 경미한 금액 비율(보통 5~10%).',
+  'Key Item 참고비율(PM의 %) — 인스코프 조서 표시용':'인스코프 조서 M14에 참고로 표시. 실제 Key Item 기준은 ② 카드별로 정합니다.',
+  '통제위험 판단 문구':'인스코프 조서 B30에 그대로 들어갑니다.','(1) 제조원가명세서 — 붙여넣기':'엑셀에서 계정과목·금액 두 열을 복사해 붙이면 즉시 반영. 탭/공백 구분 모두 인식.','(2) 손익계산서 — 붙여넣기':'엑셀에서 계정과목·금액 두 열을 복사해 붙이면 즉시 반영.',
+  // ② 원장
+  '시트':'원장이 들어 있는 시트. 5만 행이 넘으면 메모리 절약을 위해 시트 전환 시 재업로드가 필요합니다.','머리글 행':'열 이름이 있는 행 번호. 자동 추정되며 틀리면 고치세요.',
+  '왜곡표시 위험':'낮음/중간/높음 → 조정계수 1.0/1.2/1.5(통제의존) 또는 2/2.5/3(미의존). Key Item 밴드도 바뀝니다.','통제 의존':'통제테스트 결과에 의존하면 Y. 조정계수와 Key Item 밴드에 영향.',
+  'coverage 차감계수':'조정계수 = 위험계수 × (1 − Key Item coverage × 이 값) × (1 − 기타절차 감면). 법인 방법론에 따라 0.6 또는 0.7.',
+  '기타실증절차 확신':'분석적절차 등 다른 실증절차로 얻는 확신. 거의 없음 0% / 일부 20% / 상당한 50% 감면.','기타실증절차 근거 문구':'UA-1 각주 (*4) d.에 들어가는 근거 설명.',
+  '조서번호 접두 (계정 순서대로 -1, -2… 뒤에 붙음)':'UA1000이면 카드 순서대로 UA1000, UA1100, UA1200… 부여. 카드에서 직접 바꿀 수 있습니다.',
+  // 카드
+  '조서번호':'이 계정 조서의 시트 접두(예: UA1200 → UA1200-1/2/3). 직접 바꾸면 자동 번호가 멈춥니다.','양수 방향':'모집단이 되는 방향. 비용·매입은 차변, 매출·수익은 대변. 코드를 연결하면 원장 차·대변 합계로 자동 판정됩니다.',
+  '재무제표(시산) 금액':'대사 대상 금액. 총계정원장 원천이면 인스코프 시산 금액, 보조 원장 원천이면 연결한 GL 코드의 당기 발생액이 자동 입력됩니다. 직접 고치면 자동 갱신이 멈춥니다.',
+  '모집단 원천':'총계정원장 전표가 월별 집계라 샘플링이 안 되는 계정(매출 등)은 보조 원장(매출장)을 고르세요.','계정 유형':'자산·수익 / 부채·비용 — Key Item 기준금액 밴드 표를 결정합니다.',
+  'coverage 계수':'조정계수에서 Key Item coverage에 곱하는 값(0.6/0.7).','완전성 대사 기준':'발생액: 차변(비용)·대변(수익) 발생 합계 vs 재무제표 — 기본. 순액: 반대방향까지 차감.',
+  '결산·마감 전표 키워드 (거래 아님 → 제외)':'적요에 이 키워드가 있는 전표(월 결산분개·손익대체)는 거래가 아니므로 대사·모집단에서 뺍니다.','이월 전표 키워드 (기초잔액 → 제외)':'전기이월·기초이월 전표는 기초잔액이므로 대사·모집단에서 뺍니다.',
+  '상쇄 전표 쌍 (양수키워드 = 음수키워드) — 같은 |금액|의 쌍을 모집단에서 제외':'수입 3단 전표처럼 +X/−X 쌍이 있으면 「수입계산서 = 원재료대체」로 짝을 지어 모집단에서 뺍니다(합계 0이라 대사 영향 없음).',
+  // 보조원장
+  '이름':'카드 원천 목록·조서 문구에 표시되는 이름.','열 1':'전표 식별의 첫 열(예: 전표일자). 비우면 「전표(단일 열)」 매핑 또는 자동 번호.','열 2 (선택)':'두 번째 열(예: 순번). 구분자로 이어집니다.','열 3 (선택)':'세 번째 열(선택).','구분자':'열 값을 이을 문자(기본 -).',
+  '계정 시트 행 구성':'선정된 샘플만: 회사에 보낼 행만 남김(NO.는 UA-2/3 모집단 번호). 전체+숨김: 모집단 전체를 싣되 비선정 행 숨김. 전체: 모든 행에 V 표시만.','금액 부호 기준 — 카드의 계정 방향과 다르면 자동으로 부호를 뒤집습니다 (예: 매출장의 매출할인 −금액 → 차변 계정에서 +)':'매출장: 매출 +, 할인·반품 −. 매입장: 매입 +. 카드 방향(차/대)과 다르면 부호를 뒤집어 반영합니다.',
+  '① 구분 열 (예: 매출구분·계정)':'행마다 계정 구분이 적힌 열이 있으면 선택. 이 값이 그대로 구분값이 됩니다.','② 키 열 1 (예: 품목코드)':'구분 열이 없을 때 매핑표에서 찾을 키. 품목코드 등.','② 키 열 2 (선택, \'-\'로 연결)':'키를 두 열로 만들 때(예: 코드1-코드2).',
+  '② 매핑표 — 한 줄에 「키 [탭/쉼표/공백] 구분값」 (엑셀 두 열 복사·붙여넣기 가능)':'키→구분값 표. 미매핑 키는 아래에 표시되고 엑셀로 내려받아 채운 뒤 다시 올릴 수 있습니다.',
+  '집계표 행 (예: 거래구분)':'조서 「매출장 집계」 시트의 행 기준(예: jnp_gubun_nm).','집계표 열 (예: 할인구분)':'집계 시트의 열 기준(예: mag_dtgbn_nm).',
+  // ③
+  '매입·비용':'매입·비용 계정 카드의 기본 증빙 목록.','국내매출':'국내매출 카드의 기본 증빙 목록.','해외매출':'해외매출 카드의 기본 증빙 목록.','기타':'그 외 계정의 기본 증빙.','기간 구분 시트명':'③ 파일에서 계정 시트 앞에 넣는 구분 시트 이름.','파일명(차수)':'③ 파일명에 들어가는 차수 표기.'
+};
+const TIPS_F={side:'양수 방향',recon:'완전성 대사 기준',closeKw:'결산·마감 전표 키워드 (거래 아님 → 제외)',carryKw:'이월 전표 키워드 (기초잔액 → 제외)',src:'모집단 원천'};
+function applyTips(root){
+  (root||document).querySelectorAll('label.f>span').forEach(sp=>{const t=sp.textContent.trim();const k=Object.keys(TIPS).find(k=>t===k||t.startsWith(k));if(k&&!sp.parentElement.dataset.tip)sp.parentElement.dataset.tip=TIPS[k]});
+}
+const tipEl=document.createElement('div');tipEl.className='tip';tipEl.style.display='none';document.body.appendChild(tipEl);
+document.addEventListener('mouseover',e=>{const el=e.target.closest&&e.target.closest('[data-tip]');if(!el){tipEl.style.display='none';return}tipEl.textContent=el.dataset.tip;tipEl.style.display='block';
+  const r=el.getBoundingClientRect();let x=r.left,y=r.bottom+6;if(x+350>innerWidth)x=innerWidth-350;if(y+120>innerHeight)y=r.top-tipEl.offsetHeight-6;tipEl.style.left=x+'px';tipEl.style.top=y+'px'});
+document.addEventListener('mouseout',e=>{if(e.target.closest&&e.target.closest('[data-tip]'))tipEl.style.display='none'});
+// 접이식 패널
+document.querySelectorAll('section.panel.col>h2').forEach(h=>h.addEventListener('click',e=>{if(e.target.closest('button'))return;h.parentElement.toggleAttribute('data-open')}));
+// 설명서
+const MANUAL=`
+<div class="toc"><a href="#m0">개요</a><a href="#m1-basic">① 인스코프</a><a href="#m2-ledger">② 원장</a><a href="#m2-sub">② 보조 원장</a><a href="#m2-card">② 계정 카드</a><a href="#m2-rule">제외규칙</a><a href="#m2-param">파라미터</a><a href="#m3">③ 샘플 요청</a><a href="#m-save">저장/불러오기</a><a href="#m-faq">자주 겪는 문제</a></div>
+<h2 id="m0">개요</h2>
+<p>손익계정 TOD를 ① 대상 계정 선정 → ② 계정별 표본규모·추출 → ③ 회사 샘플 요청 순으로 처리합니다. 처리는 모두 브라우저 안에서만 일어나고 데이터는 어디로도 전송되지 않습니다. 화면 위쪽 3단 띠가 진행 상태입니다.</p>
+<p><b>처음이라면</b>: ① 계정-시산 붙여넣기 → 중요성 입력 → ② 총계정원장 업로드 → 카드마다 코드 선택·잔여차이 0 확인 → 「이 계정 UA1000 다운로드」. 끝나면 「작업 저장」으로 JSON을 받아 두세요.</p>
+<h2 id="m1-basic">① 인스코프 — 조서 기본정보 · 중요성</h2>
+<p>회사명·기준일·경과 월수를 넣습니다. 중요성은 벤치마크×비율(TM→PM→SAD) 또는 직접입력. 벤치마크가 분기·반기 손익이면 「연환산」을 켜세요. PM은 ② 전 카드의 Key Item 기준·Base sample 계산에 공통으로 쓰입니다.</p>
+<h2 id="m1-stmt">① 계정-시산 입력</h2>
+<p>엑셀에서 「계정과목·금액」 두 열을 복사해 붙이면 바로 표가 만들어집니다. 로마숫자 행, 합계·이익 행, 아래 행이 더 들여쓰기된 소계 행은 자동으로 테스트에서 빠지고 체크박스로 고칠 수 있습니다. PM 초과 = |금액|×12/월수 &gt; PM.</p>
+<h3 id="m1-proc">TOD 외 절차</h3><p>급여·감가상각처럼 다른 절차로 커버되는 계정은 드롭다운에서 절차를 고르면 최종 TEST에서 빠집니다. 키워드 규칙으로 PM 초과 계정에 자동 제안되며 목록은 왼쪽 패널에서 관리합니다.</p>
+<h2 id="m2-ledger">② 총계정원장</h2>
+<p>회사 ERP 총계정원장(한 파일)을 올리면 열이 자동 매핑되고 계정코드별로 나뉩니다. 차·대변이 0인 행도 보존되어 행수가 그대로 맞습니다. 5만 행이 넘으면 메모리 절약을 위해 시트 전환은 재업로드가 필요합니다.</p>
+<h2 id="m2-sub">② 보조 원장 (매출장·매입장)</h2>
+<p>총계정원장 전표가 월별 집계라 샘플링이 안 되는 계정은 매출장 같은 세부 원장을 올립니다. 여러 개를 올릴 수 있습니다.</p>
+<ul><li><b>열 매핑</b>: 금액·거래처·품목 등 자동, 틀리면 드롭다운으로 수정.</li>
+<li><b>구분값</b>: ① 행마다 계정 구분이 적힌 열(매출구분·구분)이 있으면 그 열 선택. ② 없으면 키 열(품목코드)+매핑표(「키 탭 구분값」). 미매핑 키는 엑셀로 내려받아 구분값을 채워 다시 올리면 합쳐집니다.</li>
+<li><b>금액 부호 기준</b>: 매출장은 매출 +/할인 −, 매입장은 매입 +. 카드 방향과 다르면 부호가 자동으로 뒤집힙니다(매출할인 등).</li>
+<li><b>집계표</b>: 조서 「매출장 집계」 시트의 행·열(거래구분×할인구분 등).</li></ul>
+<h2 id="m2-card">② 계정 카드</h2>
+<p>①에서 최종 Y인 계정마다 카드가 생깁니다. 카드 머리의 주황 글씨가 <b>다음 할 일</b>입니다.</p>
+<ol><li><b>원천</b>: 총계정원장(기본) 또는 보조 원장. 보조 원장이면 구분값을 체크하고, 총계정원장 코드는 「재무제표 금액 연결」로 씁니다.</li>
+<li><b>계정코드</b>: 검색창에 코드 앞자리나 계정명을 치고 체크. 재무제표 라인이 여러 코드의 합이면 전부 체크(「차이만큼 되는 미매핑 코드 조합 찾기」가 후보를 제안).</li>
+<li><b>양수 방향</b>: 코드 연결 시 원장 차·대변 합계로 자동. 어긋나면 경고 + 전환 버튼.</li>
+<li><b>완전성 대사</b>: 차변합계·대변합계 → 결산·이월·규칙 제외 → 발생액 vs 재무제표 → 차이 → 차이항목 → <b>잔여차이 0</b>이어야 조서가 성립합니다.</li>
+<li>잔여차이 0이고 모집단이 있으면 「이 계정 UA1000 다운로드」. 하단 「② UA1000 전체 다운로드」는 모든 카드를 순서대로 저장합니다.</li></ol>
+<h2 id="m2-rule">모집단 제외규칙</h2>
+<p>규칙 한 줄 = 구분명 · 열(매핑 필드 또는 원장 원본 열) · 조건(포함/일치/시작/불포함/비어 있음) · 값(쉼표 = 또는) · <b>적용 범위</b> · 근거.</p>
+<ul><li><b>모집단만(별도조서)</b>: 재무제표에는 포함되지만 다른 조서에서 테스트하는 거래(특수관계자, 미착대체, 사원판매 등). 대사는 그대로, 2A 시트에 명세.</li>
+<li><b>대사+모집단(거래 아님)</b>: 원가대체·구분='제조'처럼 거래가 아닌 전표. 대사에서도 빠져 잔여차이가 줄어듭니다. 원장 시트 O열 '제외'.</li></ul>
+<p>규칙 아래 「일치 n건」을 확인하세요. 0건이면 열·조건·값이 틀린 것입니다.</p>
+<h2 id="m2-param">파라미터 · 조정계수</h2>
+<p>Key Item 기준금액 = PM × %(유형·위험·통제의존별 밴드 안에서). Base = (모집단 − Key Item)/PM. 조정계수 = 위험계수 × (1 − coverage × 계수) × (1 − 기타절차 감면). Representative = ROUNDUP(Base × 조정계수). 임의출발점은 표본간격 미만 난수이며 「재추출」로 바꿀 수 있습니다. 공통 파라미터는 새 카드의 초기값이고, 「모든 카드에 다시 적용」으로 일괄 변경합니다.</p>
+<h2 id="m3">③ 샘플 요청</h2>
+<p>②에서 표본이 확정된 계정의 Key Item + MUS 표본을 계정별 「(양수)」 시트와 요약 시트로 묶어 회사 요청 파일을 만듭니다. 「계정 시트 행 구성」으로 선정 건만/전체+숨김/전체를 고르고, 「계정 시트 표시 열」에서 원천별(총계정원장 / 보조 원장)로 보일 열을 체크합니다 — 보조 원장 계정은 그 원장의 원본 열이 기본이고 SAMPLE·NO.·증빙 열은 항상 포함됩니다. 증빙 목록은 유형별 기본값을 계정별로 고칠 수 있습니다.</p>
+<h2 id="m-save">작업 저장 · 불러오기</h2>
+<p>「작업 저장」은 입력값·계정표·원장(원본 열 포함)·보조 원장·카드 설정을 JSON 하나로 내려받습니다. 새 버전 HTML에서 「불러오기」하면 원장을 다시 올리지 않아도 그대로 이어집니다(열 매핑 변경·시트 전환만 재업로드 필요). 저장 파일에는 회사 원장이 통째로 들어 있으니 공유 저장소에 올리지 마세요.</p>
+<h2 id="m-faq">자주 겪는 문제</h2>
+<ul><li><b>잔여차이가 남는다</b> — 재무제표 라인이 여러 코드 합(코드 조합 찾기), 계정명이 같은 다른 코드가 섞임(코드별 내역표 확인), 거래가 아닌 전표(결산·이월 키워드 또는 대사+모집단 규칙), 방향이 반대(경고의 전환 버튼).</li>
+<li><b>보조 원장 규칙이 안 먹는다</b> — 구버전 저장 파일에는 원본 열이 없습니다. 원장을 다시 올리세요. 규칙 아래 일치 건수가 0이면 열·값 확인.</li>
+<li><b>매출할인이 두 배로 차이</b> — 보조 원장의 금액 부호 기준이 수익 기준인지, 카드 방향이 차변인지 확인.</li>
+<li><b>모집단 0건</b> — 제외규칙이 전부 걸러낸 경우. 「판매(정상) 외 제외」 같은 규칙은 매출할인 카드에는 넣지 않습니다.</li></ul>
+`;
+const man=document.createElement('div');man.id='manual';man.innerHTML=`<div class="box"><div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><b style="font-size:16px">사용 설명서</b><span class="ver">${APP_VERSION}</span><button class="ghost mini" id="closeManual" style="margin-left:auto">닫기</button></div>${MANUAL}</div>`;document.body.appendChild(man);
+function openManual(anchor){man.setAttribute('data-on','');if(anchor){const el=man.querySelector('#'+anchor);if(el&&el.scrollIntoView)setTimeout(()=>el.scrollIntoView({block:'start'}),0)}}
+$('openManual').onclick=()=>openManual();$('closeManual').onclick=()=>man.removeAttribute('data-on');man.addEventListener('click',e=>{if(e.target===man)man.removeAttribute('data-on')});
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('button.help');if(b){e.stopPropagation();openManual(b.dataset.help)}});
+man.querySelectorAll('.toc a').forEach(a=>a.onclick=ev=>{ev.preventDefault();openManual(a.getAttribute('href').slice(1))});
+$('verBadge').textContent=APP_VERSION;
+// 시작 가이드(진행 상태)
+function renderGuide(){
+  const n1=S.stmts.reduce((s,t)=>s+t.rows.filter(r=>r.fin).length,0),hasL=S.ledger.rows.length>0,ready=S.accts.filter(a=>a._r&&a._r.resid===0&&a._r.inc.length).length;
+  $('guide').innerHTML=`<div><span class="n">1</span>계정-시산 붙여넣기 + 중요성 입력 → 대상 계정 확정 ${n1?`<span class="ok">✓ ${n1}계정</span>`:''}</div>
+  <div><span class="n">2</span>총계정원장(필요하면 매출장) 업로드 → 카드마다 코드·구분값 선택, 잔여차이 0 → 조서 다운로드 ${hasL?`<span class="ok">✓ 원장</span>`:''} ${ready?`<span class="ok">✓ 조서 가능 ${ready}/${S.accts.length}</span>`:''}</div>
+  <div><span class="n">3</span>표본을 모아 회사 요청 파일 생성 · 「작업 저장」으로 JSON 보관 ${ready?'<span class="ok">✓ 가능</span>':''}</div>`;
+}
+applyTips(document);
 
 recomputeScope();
 </script>
