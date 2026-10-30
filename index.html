@@ -338,7 +338,7 @@ label.f[data-tip]>span::after{content:' ⓘ';font-size:10px;color:var(--ink-2)}
 
 <script>
 /* ============================ 공통 ============================ */
-const APP_VERSION='v4.0';
+const APP_VERSION='v4.2';
 const $=id=>document.getElementById(id);
 const num=n=>(n==null||isNaN(n))?'–':Math.round(n).toLocaleString('ko-KR');
 const pct=n=>(n==null||isNaN(n))?'–':(n*100).toFixed(2)+'%';
@@ -753,9 +753,9 @@ function renderSubs0(){
 function acctRows(a){
   if(a.src&&a.src.startsWith('sub:')){const sub=subOf(a.src.slice(4));if(!sub)return [];
     const base=sub.sign==='exp'?'dr':'cr';const v=r=>a.side===base?r.amt0:-r.amt0;
-    return sub.rows.filter(r=>a.cats.includes(r.code)).map(r=>({...r,dr:a.side==='dr'?v(r):0,cr:a.side==='cr'?v(r):0,amt:v(r),pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}))}
+    return sub.rows.filter(r=>a.cats.includes(r.code)).map(r=>({...r,dr:a.side==='dr'?v(r):0,cr:a.side==='cr'?v(r):0,amt:v(r),opp:0,pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}))}
   const sel=S.ledger.rows.filter(r=>a.codes.includes(r.code));
-  return sel.map(r=>({...r,amt:a.side==='dr'?r.dr-r.cr:r.cr-r.dr,pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}));
+  return sel.map(r=>({...r,amt:a.side==='dr'?r.dr:r.cr,opp:a.side==='dr'?r.cr:r.dr,pdesc:r.desc+(r.vendor?` (${r.vendor})`:'')}));
 }
 const EXOPS=[['contains','포함'],['equals','일치'],['starts','시작'],['notContains','불포함'],['empty','비어 있음'],['notEmpty','비어 있지 않음']];
 function exFieldOptions(a){   // 매핑 필드 + 원천 원본 열
@@ -828,7 +828,8 @@ function calcAcct(a){
   const adjSum=a.adj.reduce((s,x)=>s+toNum(x.amt),0);
   const diff=net-toNum(a.fsAmt),resid=Math.round(diff+adjSum);
   const all=work.filter(r=>r.amt>0);              // 양수 발생분 = 모집단(제외 전)
-  const negRows=work.filter(r=>r.amt<0),negSum=negRows.reduce((s,r)=>s+r.amt,0);   // 음수 — MUS 모집단 제외, 2B 별도 검토
+  const negRows=work.filter(r=>r.amt<0),negSum=negRows.reduce((s,r)=>s+r.amt,0);   // 계정 방향 열의 음수 — MUS 모집단 제외, 2B 별도 검토
+  const oppRows=work.filter(r=>(r.opp||0)!==0),oppRowsSum=oppRows.reduce((s,r)=>s+(r.opp||0),0);   // 반대방향 열 전표(양·음) — 모집단 아님, 2B 참고
   const inc=[],exc=[];
   all.forEach(r=>{const w=matchEx(a,r,'pop');if(w)exc.push({...r,why:w});else inc.push(r)});
   const popAll=all.reduce((s,r)=>s+r.amt,0),pop=inc.reduce((s,r)=>s+r.amt,0);
@@ -836,13 +837,13 @@ function calcAcct(a){
   const keys=inc.filter(r=>r.amt>=T),K=keys.reduce((s,r)=>s+r.amt,0);
   const base=PM>0?(pop-K)/PM:0,cov=pop>0?K/pop:0,rf=RISK[a.risk][a.rely],red=OTHER[a.other];
   const factor=rf*(1-cov*a.covMult)*(1-red),rep=Math.max(0,Math.ceil(base*factor)),residual=pop-K,interval=rep>0?residual/rep:0;
-  if(a.seed==null)a.seed=Math.floor(Math.random()*Math.max(1,Math.floor(interval)));
-  const seed=Math.min(a.seed,Math.max(0,Math.floor(interval)));
+  if(a.seedU==null){a.seedU=(a.seed!=null&&interval>0)?Math.min(a.seed/interval,0.999999):Math.random()}   // 구버전(seed 금액) 호환
+  const seed=interval>0?Math.min(Math.floor(a.seedU*interval),Math.max(0,Math.floor(interval)-1)):0;a.seed=seed;
   const musSel=[];let rem=-seed;
   inc.forEach((r,i)=>{const f=rem+r.amt;const g=f>0&&interval>0?Math.ceil(f/interval):0;rem=f-g*interval;if(g>0)musSel.push({...r,n:i+1,sel:g})});
   const keyIdx=new Set(inc.map((r,i)=>r.amt>=T?i:-1).filter(i=>i>=0));
   const selIdx=new Set([...keyIdx,...musSel.map(x=>x.n-1)]);
-  return {PM,allRows,exHits,carryRows,carrySum,closeRows,closeDr,closeCr,ruleRows,ruleDr,ruleCr,offRows,offPos,tags,sideSum,oppSum,drSum,crSum,net,adjSum,diff,resid,negRows,negSum,byCode:Object.values(byCode),all,inc,exc,popAll,pop,T,kp,keys,K,base,cov,rf,red,factor,rep,residual,interval,seed,musSel,selIdx,total:keys.length+rep};
+  return {PM,allRows,exHits,carryRows,carrySum,closeRows,closeDr,closeCr,ruleRows,ruleDr,ruleCr,offRows,offPos,oppRows,oppRowsSum,tags,sideSum,oppSum,drSum,crSum,net,adjSum,diff,resid,negRows,negSum,byCode:Object.values(byCode),all,inc,exc,popAll,pop,T,kp,keys,K,base,cov,rf,red,factor,rep,residual,interval,seed,musSel,selIdx,total:keys.length+rep};
 }
 function ledgerSideOf(codes){   // 매핑 코드의 원장 차·대변 합계로 방향 판정
   let dr=0,cr=0;S.ledger.rows.forEach(r=>{if(codes.includes(r.code)){dr+=Math.abs(r.dr);cr+=Math.abs(r.cr)}});
@@ -933,7 +934,7 @@ function renderAccts0(){
         <table class="grid" style="margin-bottom:8px"><tr><th>코드</th><th>계정명</th><th class="n">건수</th><th class="n">차변</th><th class="n">대변</th></tr>
         ${r.byCode.map(c=>`<tr><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td class="n">${c.n}</td><td class="n">${num(c.dr)}</td><td class="n">${num(c.cr)}</td></tr>`).join('')}</table>`:''}
         ${(kp<band[0]||kp>band[1])?`<div class="bandnote">기준금액 ${kp}%는 권장 밴드(${band[0]}~${band[1]}%)를 벗어납니다. 조서에 근거를 남기세요.</div>`:''}
-        ${r?`<div style="margin-top:12px;font-size:12px;color:var(--ink-2)">모집단 완전성 — 당기 발생 기준${r.carryRows.length?` · 이월 ${r.carryRows.length}건 ${num(r.carrySum)} 제외`:''}${r.closeRows.length?` · 결산·마감 전표 ${r.closeRows.length}건 제외`:''}${r.ruleRows.length?` · 규칙(대사+모집단) ${r.ruleRows.length}건 제외`:''}${r.oppSum?` · 반대방향(${a.side==='dr'?'대변':'차변'}) 정정 ${num(r.oppSum)}은 2B에서 검토`:''}</div>
+        ${r?`<div style="margin-top:12px;font-size:12px;color:var(--ink-2)">모집단 완전성 — 당기 발생 기준${r.carryRows.length?` · 이월 ${r.carryRows.length}건 ${num(r.carrySum)} 제외`:''}${r.closeRows.length?` · 결산·마감 전표 ${r.closeRows.length}건 제외`:''}${r.ruleRows.length?` · 규칙(대사+모집단) ${r.ruleRows.length}건 제외`:''}${r.oppRows.length?` · 반대방향(${a.side==='dr'?'대변':'차변'}) 전표 ${r.oppRows.length}건 ${num(r.oppRowsSum)}은 모집단에 넣지 않고 2B에서 검토`:''}</div>
         <table class="grid" style="margin-bottom:6px"><tr><th class="n">차변합계</th><th class="n">대변합계</th><th class="n">마감전표 제외</th><th class="n">${a.recon!=='net'?(a.side==='dr'?'차변 발생액':'대변 발생액'):'순액('+(a.side==='dr'?'차−대':'대−차')+')'}</th><th class="n">재무제표</th><th class="n">차이</th><th class="n">차이항목</th><th class="n">잔여차이</th></tr>
         <tr><td class="n">${num(r.drSum)}</td><td class="n">${num(r.crSum)}</td><td class="n" style="color:var(--amber)">${r.closeRows.length?`${r.closeRows.length}건 · 차 ${num(r.closeDr)} / 대 ${num(r.closeCr)}`:'–'}</td><td class="n">${num(r.net)}</td><td class="n">${num(a.fsAmt)}</td><td class="n">${num(r.diff)}</td><td class="n">${num(r.adjSum)}</td>
         <td class="n" style="font-weight:650;color:${r.resid===0?'var(--deep)':'var(--red)'}">${num(r.resid)}${r.resid===0?' ✓':''}</td></tr></table>
@@ -964,6 +965,7 @@ function renderAccts0(){
           <li class="out"><span>합계 표본</span><span class="val">${r.total}건</span></li></ol>
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
             <button class="ghost mini" data-act="reseed">임의출발점 재추출</button>
+            <button class="ghost mini" data-act="importWp" title="엑셀에서 수정한 UA-1 위험·통제의존·기타절차·Key Item 비율과 UA-3 임의출발점을 이 카드에 반영">조서 엑셀에서 설정 읽기</button>
             <button class="mini" data-act="dl">이 계정 UA1000 다운로드</button>
             ${a.fromScope?'':'<button class="ghost mini" data-act="del">카드 삭제</button>'}
           </div></div>`:(a.fromScope?'':'<button class="ghost mini" data-act="del" style="margin-top:10px">카드 삭제</button>')}
@@ -990,7 +992,17 @@ function renderAccts0(){
       const act=b.dataset.act;
       if(act==='addAdj'){a.adj.push({label:'',amt:0});renderAccts()}
       if(act==='addEx'){a.ex.push({name:'',field:'pdesc',op:'contains',kw:'',scope:'pop',basis:''});renderAccts()}
-      if(act==='reseed'){a.seed=null;renderAccts()}
+      if(act==='reseed'){a.seedU=null;a.seed=null;renderAccts()}
+      if(act==='importWp'){const inp=document.createElement('input');inp.type='file';inp.accept='.xlsx';inp.onchange=e=>{const f=e.target.files[0];if(!f)return;readWb(f,wb=>{try{
+          const n1=wb.SheetNames.find(n=>/-1 표본규모/.test(n)),n3=wb.SheetNames.find(n=>/-3 표본/.test(n));if(!n1||!n3)throw new Error('UA-1/UA-3 시트를 찾지 못했습니다');
+          const w1=wb.Sheets[n1],w3=wb.Sheets[n3];const gv=(ws,ad)=>{const c=ws[ad];return c?c.v:undefined};
+          const risk=gv(w1,'E27'),rely=gv(w1,'E28'),other=gv(w1,'E30'),pm=gv(w1,'E21'),T=gv(w1,'E22'),seed=gv(w3,'E16'),itv=gv(w3,'E15');
+          const chg=[];if(RISK[risk]){a.risk=risk;chg.push('위험 '+risk)}if(rely==='Y'||rely==='N'){a.rely=rely;chg.push('통제의존 '+rely)}if(OTHER[other]!=null){a.other=other;chg.push('기타절차 '+other)}
+          if(typeof pm==='number'&&typeof T==='number'&&pm>0){a.keyPct=Math.round(T/pm*10000)/100;chg.push('기준금액 '+a.keyPct+'%')}
+          if(typeof seed==='number'){if(typeof itv==='number'&&itv>0){a.seedU=Math.min(seed/itv,0.999999)}else{const r0=calcAcct(a);a.seedU=r0.interval>0?Math.min(seed/r0.interval,0.999999):a.seedU}chg.push('임의출발점 '+num(seed))}
+          const bad=wb.SheetNames.find(n=>/-1 표본규모/.test(n))&&(typeof gv(w1,'E22')!=='number');
+          renderAccts();setStatus(`${a.name}: 조서에서 읽음 — ${chg.join(', ')}${bad?' (수식 캐시값이 없는 파일은 엑셀에서 한 번 저장한 뒤 올리세요)':''}`);
+        }catch(err){setStatus('조서 읽기 실패: '+err.message)}})};inp.click()}
       if(act==='flipSide'){a._sideManual=false;autoSide(a);renderAccts()}
       if(act==='findDiff'){const r0=a._r;const combos=findDiffCombos(a,-r0.diff);const box=card.querySelector('[data-diffres]');
         if(!combos.length){box.innerHTML='<div class="hint">1~5개 코드 조합으로는 차이와 일치하는 것을 찾지 못했습니다. 차이항목으로 입력하세요.</div>';return}
@@ -1155,7 +1167,7 @@ async function buildUA1000(a){
   const company=$('company').value,period=$('period').value,asOf=$('asOf').value,account=a.name,popPeriod=$('popPeriod').value;
   const wb=new ExcelJS.Workbook();wb.calcProperties.fullCalcOnLoad=true;
   const NM=a.wp||'UA1000';const S1=NM+'-1 표본규모 결정',S2=NM+'-2 Key item 추출',S2A=NM+'-2A 모집단 제외내역',S2B=NM+'-2B 음수 발생분',S3=NM+'-3 표본 추출(MUS)',SL='원장';
-  const w1=wb.addWorksheet(S1),w2=wb.addWorksheet(S2),w2a=r.exc.length?wb.addWorksheet(S2A):null,w2b=r.negRows.length?wb.addWorksheet(S2B):null,w3=wb.addWorksheet(S3),wp=wb.addWorksheet('PBC>>'),wr=wb.addWorksheet(SL);
+  const w1=wb.addWorksheet(S1),w2=wb.addWorksheet(S2),w2a=r.exc.length?wb.addWorksheet(S2A):null,w2b=(r.negRows.length||r.oppRows.length)?wb.addWorksheet(S2B):null,w3=wb.addWorksheet(S3),wp=wb.addWorksheet('PBC>>'),wr=wb.addWorksheet(SL);
   [w1,w2,w2a,w2b,w3,wp,wr].forEach(w=>{if(w)w.views=[{showGridLines:false}]});
   [w1,w2,w3].forEach(w=>w.properties.tabColor={argb:C_HDR});[w2a,w2b].forEach(w=>{if(w)w.properties.tabColor={argb:'FFB4530A'}});
   const N2=r.inc.length,adjN=Math.max(1,a.adj.length),R_CHK=14+adjN,RK=Math.max(17,R_CHK+1),R_PM=RK+3,R_RATIO=RK+4,R_CNT=RK+5,R_THR=RK+6,HDR=RK+8,D0=HDR+1,LAST2=D0+N2-1,T2=LAST2+2;
@@ -1224,7 +1236,7 @@ async function buildUA1000(a){
   sec(w2,'B9','2. 모집단 완전성 검토 및 Key Item 추출');put(w2,'C10','="1) "&B5&" 모집단의 완전성 검토"',{font:B});
   const srcTxt=a.src&&a.src.startsWith('sub:')?`${(subOf(a.src.slice(4))||{}).name||'보조 원장'} 중 구분값 [${a.cats.join(', ')}] 행`:`원장 당기 ${sideK}합계`;
   put(w2,'C11',`="① 모집단: "&"${q(popPeriod)} "&B5&" ${sideK} 발생분 (${q(srcTxt)}${gross?' — 재무제표(시산)와 '+sideK+' 발생액 기준으로 대사':''})"`);
-  const negTxt=r.negRows.length?` ${sideK} 음수 발생분 ${r.negRows.length}건(${num(r.negSum)})은 MUS 모집단에서 제외하고 ${NM}-2B에서 별도 검토함(우측 조정표).`:'';
+  const negTxt=(r.negRows.length?` ${sideK} 음수 발생분 ${r.negRows.length}건(${num(r.negSum)})은 MUS 모집단에서 제외하고 ${NM}-2B에서 별도 검토함(우측 조정표).`:'')+(r.oppRows.length?` 반대방향(${a.side==='dr'?'대변':'차변'}) 전표 ${r.oppRows.length}건(${num(r.oppRowsSum)})은 ${sideK} 발생이 아니므로 모집단에 포함하지 않고 ${NM}-2B에서 별도 검토함.`:'');
   put(w2,'C12',(r.exc.length?`② 회사로부터 원장을 징구하여 ${sideK}합계·대변합계를 집계하고 순액을 재무제표(시산)와 대조함(차이내역 아래 표). 또한 ${a.ex.filter(e=>e.name).map(e=>e.name).join(' 및 ')}은 별도 조서 대상으로 본 조서 모집단에서 제외함(${NM}-2A 참조).`
     :`② 회사로부터 원장을 징구하여 차변합계·대변합계를 집계하고 순액을 재무제표(시산)와 대조함(차이내역은 아래 표). 잔여차이 0 확인.`)+negTxt);
   ['구분','차변합계(당기)','대변합계(당기)',gross?`${sideK} 발생액`:`순액(${a.side==='dr'?'차−대':'대−차'})`,'재무제표','차이','차이내역(비고)','금액'].forEach((h,i)=>put(w2,String.fromCharCode(67+i)+'13',h,{hdr:1}));
@@ -1242,7 +1254,7 @@ async function buildUA1000(a){
   put(w2,'L26',`참고: 규칙 제외(대사+모집단) ${sideK} / 반대방향`,{note:1});put(w2,'M26',`=SUMIF(${TG},"제외",${SS})`,{fmt:N,note:1});put(w2,'N26',`=SUMIF(${TG},"제외",${OO})`,{fmt:N,note:1});
   put(w2,'L17','(-) 상쇄 전표 양수분 (모집단 제외)',{bd:1});put(w2,'M17',`=-SUMIFS(${SS},${TG},"상쇄",${SS},">0")`,{fmt:N,bd:1});
   put(w2,'L18','(+) 상쇄 전표 음수분 (양수와 상쇄 → 합계 0)',{bd:1});put(w2,'M18',`=-SUMIFS(${SS},${TG},"상쇄",${SS},"<0")`,{fmt:N,bd:1});
-  put(w2,'L19',`(-) ${sideK} 음수 발생분 (MUS 제외·별도 검토${w2b?', '+NM+'-2B':''})`,{bd:1});put(w2,'M19',w2b?`='${S2B}'!E8`:`=SUMIFS(${SS},${SS},"<0",${TG},"<>상쇄",${XC})-SUMIFS(${OO},${TG},"<>상쇄",${XC})`,{fmt:N,bd:1});
+  put(w2,'L19',`(-) ${sideK} 음수 발생분 (MUS 제외·별도 검토${w2b?', '+NM+'-2B':''})`,{bd:1});put(w2,'M19',w2b?`='${S2B}'!E8`:`=SUMIFS(${SS},${SS},"<0",${TG},"<>상쇄",${XC})`,{fmt:N,bd:1});
   put(w2,'L20','양수 발생 합계 (= 모집단, 제외 전)',{bd:1});put(w2,'M20','=M16+M17+M18-M19',{fmt:N,bd:1,font:B});
   put(w2,'L21','(-) 별도조서 제외분',{bd:1});put(w2,'M21',0,{fmt:N,bd:1});
   put(w2,'L22','본 조서 모집단',{res:1});put(w2,'M22','=M20+M21',{fmt:N,res:1});
@@ -1281,24 +1293,34 @@ async function buildUA1000(a){
     const h0=n+1;[...r.exc].sort((x,y)=>y.amt-x.amt).forEach((x,i)=>{const rr=h0+i;put(w2a,'C'+rr,i+1,{bd:1});put(w2a,'D'+rr,x.key,{bd:1});put(w2a,'E'+rr,x.code,{bd:1});put(w2a,'F'+rr,x.name,{bd:1});put(w2a,'G'+rr,x.amt,{fmt:N,bd:1});put(w2a,'H'+rr,x.pdesc,{bd:1});put(w2a,'I'+rr,x.why,{bd:1})});
     const rt=h0+r.exc.length;put(w2a,'C'+rt,'합계',{res:1});['D','E','F','H','I'].forEach(c=>put(w2a,c+rt,'',{res:1}));put(w2a,'G'+rt,`=SUM(G${h0}:G${rt-1})`,{fmt:N,res:1});
   }
-  /* --- 2B 음수 발생분 --- */
+  /* --- 2B 음수·반대방향 발생분 --- */
   if(w2b){
-    widths(w2b,{B:1.3,C:6,D:24,E:16,F:14,G:12,H:24,I:18,J:44,K:30});
+    widths(w2b,{B:1.3,C:6,D:24,E:16,F:14,G:12,H:24,I:16,J:16,K:40,L:28,M:16});
     title(w2b,account+` TOD(2B) - 음수·반대방향 발생분 검토`);
-    put(w2b,'B5',`※ ${sideK} 음수 전표와 반대방향(${a.side==='dr'?'대변':'차변'}) 정정 전표(취소·반품·정정, 결산분개 제외)는 MUS 모집단에서 제외하고 아래에서 별도 검토함.`,{note:1});
+    put(w2b,'B5',`※ ①${sideK} 열의 음수 전표는 ${sideK} 발생 합계에 포함되지만 MUS 모집단에서 제외하고 별도 검토함. ②반대방향(${a.side==='dr'?'대변':'차변'}) 열의 전표는 ${sideK} 발생이 아니므로 대사·모집단 어디에도 넣지 않고 성격을 확인함.`,{note:1});
     sec(w2b,'B6','1. 요약');
     put(w2b,'C7',`${sideK}합계 (당기 발생)`,{bd:1});put(w2b,'E7',`='${S2}'!M16`,{fmt:N,bd:1});
-    put(w2b,'C8',`음수·반대방향 발생분 합계 (방향 기준)`,{res:1});put(w2b,'E8',`=SUM(I14:I${13+r.negRows.length})`,{fmt:N,res:1});
-    put(w2b,'C9','건수',{bd:1});put(w2b,'E9',r.negRows.length,{fmt:N,bd:1});
-    put(w2b,'C10',`check (원장 SUMIF 음수 = 명세 합계)`,{bd:1});put(w2b,'E10',`=ROUND(SUMIFS(${SS},${SS},"<0",${TG},"<>상쇄",${XC})-SUMIFS(${OO},${TG},"<>상쇄",${XC})-E8,0)=0`,{bd:1,al:{horizontal:'center'}});cfBool(w2b,'E10');
-    put(w2b,'C11','[확인필요] 음수 전표의 성격(취소·반품·정정)과 대응 양수 전표(원거래) 확인, 기간귀속 적정성 검토 후 K열에 결과 기재',{fill:'FFFFFF00'});
-    ['No.','재무회계 KEY','계정코드','계정명','날짜','거래처명',`금액(${sideK} 기준)`,'적요','검토결과'].forEach((h,i)=>put(w2b,String.fromCharCode(67+i)+'13',h,{hdr:1}));w2b.getRow(13).height=24;
-    put(w2b,'L13','유형',{hdr:1});
-    [...r.negRows].sort((x,y)=>x.amt-y.amt).forEach((x,i)=>{const rr=14+i;put(w2b,'C'+rr,i+1,{bd:1,al:{horizontal:'center'}});put(w2b,'D'+rr,x.key,{bd:1});put(w2b,'E'+rr,x.code,{bd:1});put(w2b,'F'+rr,x.name,{bd:1});
-      put(w2b,'G'+rr,x.date,{bd:1});put(w2b,'H'+rr,x.vendor,{bd:1});put(w2b,'I'+rr,x.amt,{fmt:N,bd:1});put(w2b,'J'+rr,x.desc,{bd:1});put(w2b,'K'+rr,'',{bd:1,fill:C_IN});
-      put(w2b,'L'+rr,(a.side==='dr'?x.cr:x.dr)>0?`반대방향(${a.side==='dr'?'대변':'차변'})`:`${sideK} 음수`,{bd:1})});
-    const rt=14+r.negRows.length;put(w2b,'C'+rt,'합계',{res:1});['D','E','F','G','H','J','K'].forEach(c=>put(w2b,c+rt,'',{res:1}));put(w2b,'I'+rt,`=SUM(I14:I${rt-1})`,{fmt:N,res:1});
-    w2b.views=[{state:'frozen',ySplit:13,showGridLines:false}];
+    const n1=r.negRows.length,n2=r.oppRows.length,h1=15,t1=h1+n1,h2=t1+4,t2=h2+n2;
+    put(w2b,'C8',`① ${sideK} 음수 발생분 합계 (조정표 연결)`,{res:1});put(w2b,'E8',n1?`=SUM(I${h1}:I${t1-1})`:0,{fmt:N,res:1});
+    put(w2b,'C9',`② 반대방향(${a.side==='dr'?'대변':'차변'}) 발생분 합계 (참고)`,{bd:1});put(w2b,'E9',n2?`=SUM(J${h2}:J${t2-1})`:0,{fmt:N,bd:1});
+    put(w2b,'C10',`check (원장 ${sideK} 음수 SUMIFS = ① 합계)`,{bd:1});put(w2b,'E10',`=ROUND(SUMIFS(${SS},${SS},"<0",${TG},"<>상쇄",${XC})-E8,0)=0`,{bd:1,al:{horizontal:'center'}});cfBool(w2b,'E10');
+    put(w2b,'C11','[확인필요] 음수·반대방향 전표의 성격(취소·반품·정정·오류수정)과 대응 원거래 확인, 기간귀속 적정성 검토 후 검토결과 열에 기재',{fill:'FFFFFF00'});
+    const hdrs=['No.','재무회계 KEY','계정코드','계정명','날짜','거래처명','차변','대변','적요','검토결과'];
+    sec(w2b,'B'+(h1-2),`① ${sideK} 음수 발생분 (${n1}건)`);
+    hdrs.forEach((h,i)=>put(w2b,String.fromCharCode(67+i)+(h1-1),h,{hdr:1}));
+    const line=(x,i,rr)=>{put(w2b,'C'+rr,i+1,{bd:1,al:{horizontal:'center'}});put(w2b,'D'+rr,x.key,{bd:1});put(w2b,'E'+rr,x.code,{bd:1});put(w2b,'F'+rr,x.name,{bd:1});put(w2b,'G'+rr,x.date,{bd:1});put(w2b,'H'+rr,x.vendor,{bd:1});
+      put(w2b,'I'+rr,x.dr||0,{fmt:N,bd:1});put(w2b,'J'+rr,x.cr||0,{fmt:N,bd:1});put(w2b,'K'+rr,x.desc,{bd:1});put(w2b,'L'+rr,'',{bd:1,fill:C_IN})};
+    // ①: 방향 열(I 또는 J)에 음수 — 조정표 합계는 방향 열 기준
+    const sideCol=a.side==='dr'?'I':'J';
+    [...r.negRows].sort((x,y)=>x.amt-y.amt).forEach((x,i)=>line(x,i,h1+i));
+    if(n1){put(w2b,'C'+t1,'합계',{res:1});['D','E','F','G','H','K','L'].forEach(c=>put(w2b,c+t1,'',{res:1}));put(w2b,'I'+t1,`=SUM(I${h1}:I${t1-1})`,{fmt:N,res:1});put(w2b,'J'+t1,`=SUM(J${h1}:J${t1-1})`,{fmt:N,res:1})}
+    if(sideCol==='J'&&n1)put(w2b,'E8',`=SUM(J${h1}:J${t1-1})`,{fmt:N,res:1});
+    sec(w2b,'B'+(h2-2),`② 반대방향(${a.side==='dr'?'대변':'차변'}) 발생분 (${n2}건) — 모집단·대사 제외`);
+    hdrs.forEach((h,i)=>put(w2b,String.fromCharCode(67+i)+(h2-1),h,{hdr:1}));
+    [...r.oppRows].sort((x,y)=>(x.opp||0)-(y.opp||0)).forEach((x,i)=>line(x,i,h2+i));
+    if(n2){put(w2b,'C'+t2,'합계',{res:1});['D','E','F','G','H','K','L'].forEach(c=>put(w2b,c+t2,'',{res:1}));put(w2b,'I'+t2,`=SUM(I${h2}:I${t2-1})`,{fmt:N,res:1});put(w2b,'J'+t2,`=SUM(J${h2}:J${t2-1})`,{fmt:N,res:1});
+      put(w2b,'E9',`=SUM(${a.side==='dr'?'J':'I'}${h2}:${a.side==='dr'?'J':'I'}${t2-1})`,{fmt:N,bd:1})}
+    w2b.views=[{state:'frozen',ySplit:0,showGridLines:false}];
   }
   /* --- 3 --- */
   widths(w3,{A:1.3,B:1.3,C:22,D:31,E:20.7,F:20.7,G:16,H:20.7,I:22,J:2.3});
@@ -1345,7 +1367,7 @@ function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags,extra,opts){
   const allRows=rowsIn||r.all;
   const isSelRow=x=>{const pi=incIdx.get(x.idx);return pi!=null&&r.selIdx.has(pi)};
   const rows=opts.onlySel?allRows.filter(isSelRow):allRows;
-  const noOf=x=>opts.onlySel?(incIdx.get(x.idx)+1):(allRows.indexOf(x)+1);   // 선정건만: 모집단 No.(UA-2·UA-3와 동일)
+  const noOf=x=>{const pi=incIdx.get(x.idx);return pi==null?'':pi+1};   // 항상 모집단 No. (UA-2·UA-3와 동일), 제외행은 빈칸
   put(ws,'C1','회사명  :  '+$('companyFull').value,{font:B});if(noteText)put(ws,'E1',noteText,{note:1});
   put(ws,'J1',`=SUBTOTAL(9,J3:J${rows.length+2})`,{fmt:N,res:1});put(ws,'K1',`=SUBTOTAL(9,K3:K${rows.length+2})`,{fmt:N,res:1});
   const hdr=['SAMPLE','NO.',...order.map(k=>LCOLS.find(c=>c[0]===k)[1])];
@@ -1390,14 +1412,14 @@ function writeLedgerSheet(ws,a,r,evid,rowsIn,noteText,tags,extra,opts){
 function writeReqSheet(ws,a,r,evid,opts){   // ③ 계정 시트: 원천별 선택 열
   const cols=opts.cols,ev=evid||[];const incIdx=new Map(r.inc.map((x,i)=>[x.idx,i]));
   const isSelRow=x=>{const pi=incIdx.get(x.idx);return pi!=null&&r.selIdx.has(pi)};
-  const allRows=r.all,rows=opts.onlySel?allRows.filter(isSelRow):allRows;const noOf=x=>opts.onlySel?(incIdx.get(x.idx)+1):(allRows.indexOf(x)+1);
+  const allRows=r.all,rows=opts.onlySel?allRows.filter(isSelRow):allRows;const noOf=x=>{const pi=incIdx.get(x.idx);return pi==null?'':pi+1};
   put(ws,'C1','회사명  :  '+$('companyFull').value,{font:B});
   const hdr=['SAMPLE','NO.',...cols.map(c=>c.label)];const EV0=hdr.length;ev.forEach((e,i)=>{hdr.push(e);put(ws,col(EV0+i)+'1','증빙 '+(i+1),{sub:1,al:{horizontal:'center'}})});
   cols.forEach((c,j)=>{if(c.num)put(ws,col(2+j)+'1',`=SUBTOTAL(9,${col(2+j)}3:${col(2+j)}${rows.length+2})`,{fmt:N,res:1})});
   hdr.forEach((h,i)=>put(ws,col(i)+'2',h,{hdr:1}));ws.getRow(2).height=24;
   const listStart=rows.length+5,sel=[];
   rows.forEach((x,i)=>{const rw=3+i,no=noOf(x),isSel=isSelRow(x);if(isSel)sel.push(no);
-    put(ws,'B'+rw,no,{al:{horizontal:'center'}});
+    if(no!=='')put(ws,'B'+rw,no,{al:{horizontal:'center'}});else put(ws,'B'+rw,'(제외)',{al:{horizontal:'center'},note:1});
     cols.forEach((c,j)=>{let v=c.val(x);if(v==null)v='';if(c.num)v=v||0;if(v!=='')put(ws,col(2+j)+rw,v,{fmt:c.num?N:undefined})});
     ev.forEach((e,j)=>put(ws,col(EV0+j)+rw,'',{bd:isSel?1:undefined}));
     if(opts.onlySel)put(ws,'A'+rw,'V',{font:B,al:{horizontal:'center'}});else if(opts.hideOthers&&!isSel)ws.getRow(rw).hidden=true;
@@ -1532,7 +1554,8 @@ async function buildReq(){
   const wb=new ExcelJS.Workbook();wb.calcProperties.fullCalcOnLoad=true;
   const ws=wb.addWorksheet('계정별 요청증빙(공통)');ws.views=[{showGridLines:false}];
   widths(ws,{A:1.3,B:22,C:10,D:16,E:16,F:18,G:20,H:16,I:18,J:20,K:26});
-  ['계정과목','샘플 건수','증빙 1','증빙 2','증빙 3','증빙 4','증빙 5','증빙 6','증빙 7','링크'].forEach((h,i)=>put(ws,col(1+i)+'2',h,{hdr:1}));ws.getRow(2).height=24;ws.properties.tabColor={argb:C_HDR};
+  ['계정과목','샘플 건수','증빙 1','증빙 2','증빙 3','증빙 4','증빙 5','증빙 6','증빙 7','링크','조서번호','Key Item','Representative','임의출발점','표본간격','모집단'].forEach((h,i)=>put(ws,col(1+i)+'2',h,{hdr:1}));ws.getRow(2).height=24;ws.properties.tabColor={argb:C_HDR};
+  widths(ws,{L:12,M:10,N:14,O:16,P:16,Q:18});
   const div=wb.addWorksheet($('divName').value||'▶');put(div,'A1',$('divName').value,{font:T11});div.properties.tabColor={argb:'FFBFBFBF'};
   ready.forEach((a,i)=>{
     const sn=(a.name.replace(/[\[\]\*\?\/\\:]/g,'')+'(양수)').slice(0,31);
@@ -1543,6 +1566,7 @@ async function buildReq(){
     const rw=3+i;put(ws,'B'+rw,a.name,{bd:1});put(ws,'C'+rw,info.countRange?`=COUNTA('${sn}'!${info.countRange})`:`=COUNTA('${sn}'!C${info.listStart}:C${info.listEnd})`,{bd:1,al:{horizontal:'center'}});
     ev.slice(0,7).forEach((e,j)=>put(ws,col(3+j)+rw,e,{bd:1}));for(let j=ev.length;j<7;j++)put(ws,col(3+j)+rw,undefined,{bd:1});
     const c=ws.getCell('K'+rw);c.value={text:sn+'!A1',hyperlink:`#'${sn}'!A1`};c.font=FONT({color:{argb:'FF0563C1'},underline:true});c.border=BD;
+    put(ws,'L'+rw,a.wp||'',{bd:1});put(ws,'M'+rw,a._r.keys.length,{bd:1,al:{horizontal:'center'}});put(ws,'N'+rw,a._r.rep,{bd:1,al:{horizontal:'center'}});put(ws,'O'+rw,a._r.seed,{bd:1,fmt:N});put(ws,'P'+rw,Math.round(a._r.interval),{bd:1,fmt:N});put(ws,'Q'+rw,a._r.pop,{bd:1,fmt:N});
   });
   const tr=3+ready.length;put(ws,'B'+tr,'합계',{res:1});put(ws,'C'+tr,`=SUM(C3:C${tr-1})`,{res:1,al:{horizontal:'center'}});for(let j=3;j<=10;j++)put(ws,col(j)+tr,'',{res:1});
   return wb;
@@ -1569,7 +1593,7 @@ function snapshot(){
   return {app:'손익계정 TOD 파이프라인',v:APP_VERSION,saved:new Date().toISOString(),inputs,stmts:S.stmts,
     ledger:{hdr:S.ledger.hdr,map:S.ledger.map,cols:ROWKEYS,rowsArr:S.ledger.rows.map(r=>ROWKEYS.map(k=>r[k])),ext2:encodeExt(),codes:S.ledger.codes,stat:S.ledger.stat,sheet:$('lSheet').value,hdrRow:$('lHdr').value},
     subs:S.subs.map(sub=>({id:sub.id,name:sub.name,sign:sub.sign,big:sub.big,idCols:sub.idCols,idSep:sub.idSep,keyUniq:sub.keyUniq,keyDup:sub.keyDup,sheet:sub.sheet,hdrRow:sub.hdrRow,hdr:sub.hdr,map:sub.map,keyCols:sub.keyCols,catCol:sub.catCol,mapText:sub.mapText,pivotCols:sub.pivotCols,stat:sub.stat,cols:SUBKEYS,rowsArr:sub.rows.map(r=>SUBKEYS.map(k=>r[k])),ext2:encodeExtOf(sub,false)})),
-    accts:S.accts.map(a=>{const o={...a};delete o._r;return o}),reqTab:REQTAB,reqCols:S.reqCols};
+    accts:S.accts.map(a=>{const o={...a};delete o._r;return o}),reqTab:REQTAB,reqCols:S.reqCols};  // seedU(임의출발점 비율) 포함
 }
 $('saveJ').onclick=()=>{const j=JSON.stringify(snapshot());download(new TextEncoder().encode(j),`TOD작업_${$('company').value}_${$('period').value}_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.json`,'application/json');setStatus('작업 상태를 저장했습니다.')};
 $('loadJ').onclick=()=>$('fileJ').click();
@@ -1680,7 +1704,9 @@ const MANUAL=`
 <ul><li><b>잔여차이가 남는다</b> — 재무제표 라인이 여러 코드 합(코드 조합 찾기), 계정명이 같은 다른 코드가 섞임(코드별 내역표 확인), 거래가 아닌 전표(결산·이월 키워드 또는 대사+모집단 규칙), 방향이 반대(경고의 전환 버튼).</li>
 <li><b>보조 원장 규칙이 안 먹는다</b> — 구버전 저장 파일에는 원본 열이 없습니다. 원장을 다시 올리세요. 규칙 아래 일치 건수가 0이면 열·값 확인.</li>
 <li><b>매출할인이 두 배로 차이</b> — 보조 원장의 금액 부호 기준이 수익 기준인지, 카드 방향이 차변인지 확인.</li>
-<li><b>모집단 0건</b> — 제외규칙이 전부 걸러낸 경우. 「판매(정상) 외 제외」 같은 규칙은 매출할인 카드에는 넣지 않습니다.</li></ul>
+<li><b>반대방향 전표</b> — 비용계정의 대변(또는 수익계정의 차변)에 적힌 금액은 부호와 관계없이 그 계정의 발생이 아니므로 모집단·대사에 넣지 않고 2B ②에 따로 보여줍니다. 계정 방향 열의 음수는 2B ①(조정표 연결)입니다.</li>
+<li><b>모집단 0건</b> — 제외규칙이 전부 걸러낸 경우. 「판매(정상) 외 제외」 같은 규칙은 매출할인 카드에는 넣지 않습니다.</li>
+<li><b>조서(UA1000)와 샘플요청 파일의 표본이 다르다</b> — 두 파일은 생성 시점의 툴 상태로 만들어집니다. 조서를 만든 뒤 중요성·위험·기준금액·제외규칙을 바꾸거나 엑셀에서 임의출발점·위험 등을 직접 고치면 요청 파일과 달라집니다. 엑셀에서 고친 경우 카드의 「조서 엑셀에서 설정 읽기」로 그 값을 툴에 반영한 뒤 ③을 다시 만드세요. 두 파일 모두 NO.는 조서 모집단 번호이고, 요약 시트의 Key Item·Representative·임의출발점으로 대조할 수 있습니다.</li></ul>
 `;
 const man=document.createElement('div');man.id='manual';man.innerHTML=`<div class="box"><div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><b style="font-size:16px">사용 설명서</b><span class="ver">${APP_VERSION}</span><button class="ghost mini" id="closeManual" style="margin-left:auto">닫기</button></div>${MANUAL}</div>`;document.body.appendChild(man);
 function openManual(anchor){man.setAttribute('data-on','');if(anchor){const el=man.querySelector('#'+anchor);if(el&&el.scrollIntoView)setTimeout(()=>el.scrollIntoView({block:'start'}),0)}}
